@@ -250,7 +250,11 @@ export class NotePlayerView extends ItemView {
 			elements.progressFill = null;
 			elements.progressTime = null;
 			this.stopProgressInterval();
-			this.playerSurface.clear();
+			// Only clear the surface when it actually has a track loaded.
+			// Calling clear() unconditionally triggers onPlaybackChange('idle') -> notifyChange -> render -> infinite loop.
+			if (state.playbackState !== 'idle') {
+				this.playerSurface.clear();
+			}
 			return;
 		}
 

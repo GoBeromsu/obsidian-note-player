@@ -57,12 +57,13 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     }
 
     this.playerHostEl = document.createElement('div');
-    this.playerHostEl.className = 'ynp-player-video';
+    this.playerHostEl.className = 'onp-player-video';
 
     this.playerSurface = new PlayerSurface(
       this.playerHostEl,
       async () => { await this.playNext(); },
       (state: PlaybackState) => {
+        if (this.viewPlaybackState === state) return;
         this.viewPlaybackState = state;
         this.notifyChange();
       },

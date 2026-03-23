@@ -86,7 +86,7 @@ function loadYouTubeApi(): Promise<YouTubeApiNamespace> {
 		const script = document.createElement('script');
 		script.src = 'https://www.youtube.com/iframe_api';
 		script.async = true;
-		script.dataset.ynpYoutubeApi = 'true';
+		script.dataset.onpYoutubeApi = 'true';
 		script.onerror = () => reject(new Error('Failed to load the YouTube player API.'));
 		document.head.appendChild(script);
 	});
