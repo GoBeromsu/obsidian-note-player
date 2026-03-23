@@ -40,6 +40,7 @@ export class NotePlayerView extends ItemView {
 	private actionInFlight = false;
 	private lastRenderedTrackPath: string | null = null;
 	private progressIntervalId: number | null = null;
+	private isRendering = false;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -115,14 +116,21 @@ export class NotePlayerView extends ItemView {
 	}
 
 	private render(): void {
+		if (this.isRendering) return;
+
 		const elements = this.elements;
 		if (!elements) return;
 
-		const state = this.host.getState();
-		this.renderToolbar(state);
-		this.renderHero(state);
-		this.renderPlayer(state);
-		this.renderQueue(state);
+		this.isRendering = true;
+		try {
+			const state = this.host.getState();
+			this.renderToolbar(state);
+			this.renderHero(state);
+			this.renderPlayer(state);
+			this.renderQueue(state);
+		} finally {
+			this.isRendering = false;
+		}
 	}
 
 	private applyResponsiveClasses(width: number): void {

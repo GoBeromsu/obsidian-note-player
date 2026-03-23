@@ -104,6 +104,7 @@ export class PlayerSurface {
 	private audioCacheService: AudioCachePort | null = null;
 	private hasReceivedPlayingState = false;
 	private audioFallbackAttempted = false;
+	private suppressCallbacks = false;
 
 	constructor(
 		host: HTMLElement,
@@ -124,10 +125,12 @@ export class PlayerSurface {
 			}
 		}
 
-		// Always create a fresh player — loadVideoById breaks after DOM re-attachment
+		// Always create a fresh player — loadVideoById breaks after DOM re-attachment.
+		// Tear down existing media without firing playback-change events to avoid
+		// synchronous re-entry into the view's render cycle.
 		this.player?.destroy();
 		this.player = null;
-		this.audioElement?.pause();
+		this.silentPauseAudio();
 		this.audioElement = null;
 		this.playerRoot?.remove();
 		this.playerRoot = null;
@@ -253,22 +256,37 @@ export class PlayerSurface {
 	clear(): void {
 		this.currentVideoId = null;
 		this.currentAutoplay = false;
-		this.onPlaybackChange('idle');
 		this.player?.destroy();
 		this.player = null;
-		this.audioElement?.pause();
+		this.silentPauseAudio();
 		this.audioElement = null;
 		this.playerRoot?.remove();
 		this.playerRoot = null;
+		// Notify idle AFTER all teardown is complete so any synchronous
+		// re-render triggered by the subscriber sees a fully clean surface.
+		this.onPlaybackChange('idle');
 	}
 
 	destroy(): void {
 		this.player?.destroy();
 		this.player = null;
-		this.audioElement?.pause();
+		this.silentPauseAudio();
 		this.audioElement = null;
 		this.playerRoot?.remove();
 		this.playerRoot = null;
+	}
+
+	/** Pause the audio element without triggering playback-change notifications.
+	 *  The `pause` event fires synchronously from HTMLAudioElement.pause(),
+	 *  which would cause re-entrant render cycles through onPlaybackChange. */
+	private silentPauseAudio(): void {
+		if (!this.audioElement) return;
+		this.suppressCallbacks = true;
+		try {
+			this.audioElement.pause();
+		} finally {
+			this.suppressCallbacks = false;
+		}
 	}
 
 	private async renderAudioFallback(track: PlaylistTrack, autoplayEnabled: boolean): Promise<void> {
@@ -304,16 +322,23 @@ export class PlayerSurface {
 	}
 
 	private mountAudio(url: string, autoplay: boolean): void {
-		this.audioElement?.pause();
+		this.silentPauseAudio();
 		this.audioElement?.remove();
 
 		const audio = new Audio(url);
 		audio.addEventListener('ended', () => {
+			if (this.suppressCallbacks) return;
 			this.onPlaybackChange('paused');
 			void this.onEnded();
 		});
-		audio.addEventListener('play', () => this.onPlaybackChange('playing'));
-		audio.addEventListener('pause', () => this.onPlaybackChange('paused'));
+		audio.addEventListener('play', () => {
+			if (this.suppressCallbacks) return;
+			this.onPlaybackChange('playing');
+		});
+		audio.addEventListener('pause', () => {
+			if (this.suppressCallbacks) return;
+			this.onPlaybackChange('paused');
+		});
 		this.audioElement = audio;
 
 		if (autoplay) {
