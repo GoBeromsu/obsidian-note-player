@@ -102,6 +102,7 @@ export class PlayerSurface {
 	cancelDownload(): void {
 		if (this.currentVideoId) {
 			this.downloadCancelled = true;
+			this.onDownloadProgress?.(-1);
 			this.audioCacheService?.cancel(this.currentVideoId);
 		}
 	}

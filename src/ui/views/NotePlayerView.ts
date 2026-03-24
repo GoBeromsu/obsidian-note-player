@@ -41,7 +41,6 @@ export class NotePlayerView extends ItemView {
 	private lastRenderedTrackPath: string | null = null;
 	private progressIntervalId: number | null = null;
 	private isRendering = false;
-	private downloadProgress: number | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -101,19 +100,6 @@ export class NotePlayerView extends ItemView {
 			this.render();
 		});
 
-		this.playerSurface.onDownloadProgress = (percent: number, error?: string) => {
-			const title = this.host.getState().currentTrack?.title ?? 'track';
-			if (percent === 0 && this.downloadProgress === null) {
-				new Notice(`Downloading ${title}...`, 3000);
-			} else if (percent === 100) {
-				new Notice(`Downloaded ${title}.`, 2000);
-			} else if (percent === -1) {
-				new Notice(error ? `Download failed: ${error}` : 'Download failed.', 5000);
-			}
-			this.downloadProgress = percent;
-			this.render();
-		};
-
 		this.render();
 	}
 
@@ -123,8 +109,6 @@ export class NotePlayerView extends ItemView {
 		this.resizeObserver?.disconnect();
 		this.resizeObserver = null;
 		this.stopProgressInterval();
-		this.downloadProgress = null;
-		this.playerSurface.onDownloadProgress = null;
 		if (this.playerHostEl.parentElement) {
 			this.playerHostEl.parentElement.removeChild(this.playerHostEl);
 		}
@@ -270,7 +254,6 @@ export class NotePlayerView extends ItemView {
 		if (!current) {
 			elements.playerPanel.style.display = 'none';
 			this.lastRenderedTrackPath = null;
-			this.downloadProgress = null;
 			elements.progressBar = null;
 			elements.progressFill = null;
 			elements.progressTime = null;
@@ -349,42 +332,6 @@ export class NotePlayerView extends ItemView {
 				},
 				{ iconOnly: true, active: state.repeatMode === 'one' },
 			));
-		}
-
-		// Download progress overlay
-		const isDownloading = this.downloadProgress !== null && this.downloadProgress >= 0 && this.downloadProgress < 100;
-		const downloadFailed = this.downloadProgress === -1;
-
-		if (isDownloading || downloadFailed) {
-			const downloadOverlay = summary.createDiv({
-				cls: downloadFailed ? 'onp-download-overlay is-failed' : 'onp-download-overlay',
-			});
-
-			if (isDownloading) {
-				const progressRow = downloadOverlay.createDiv({ cls: 'onp-download-progress' });
-				const bar = progressRow.createDiv({ cls: 'onp-progress-bar' });
-				const fill = bar.createDiv({ cls: 'onp-progress-fill' });
-				fill.style.width = `${this.downloadProgress}%`;
-				progressRow.createDiv({
-					cls: 'onp-download-text',
-					text: `Downloading... ${Math.round(this.downloadProgress!)}%`,
-				});
-				downloadOverlay.appendChild(
-					this.createActionButton('Cancel download', 'x', () => {
-						this.playerSurface.cancelDownload();
-						this.downloadProgress = null;
-						this.render();
-					}, { iconOnly: true }),
-				);
-			} else if (downloadFailed) {
-				downloadOverlay.createDiv({ cls: 'onp-download-text', text: 'Download failed' });
-				downloadOverlay.appendChild(
-					this.createActionButton('Retry', 'refresh-cw', () => {
-						this.downloadProgress = null;
-						void this.playerSurface.render(current, state.autoplayEnabled);
-					}, { iconOnly: true }),
-				);
-			}
 		}
 
 		const progressShell = summary.createDiv({ cls: 'onp-progress-shell' });

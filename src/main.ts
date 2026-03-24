@@ -19,6 +19,7 @@ import type { PlaybackState } from './types/playback';
 import { NotePlayerSettingsTab } from './ui/settings';
 import { VIEW_TYPE_NOTE_PLAYER, VIEW_TYPE_LEGACY, NotePlayerView } from './ui/views/NotePlayerView';
 import { PlayerSurface } from './ui/views/PlayerSurface';
+import { DownloadStatusBar } from './ui/download-status-bar';
 
 const EMPTY_LIBRARY: MusicLibrarySnapshot = {
   tracks: [],
@@ -46,6 +47,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   private playerSurface: PlayerSurface | null = null;
   private playerHostEl: HTMLDivElement | null = null;
   private viewPlaybackState: PlaybackState = 'idle';
+  private downloadStatusBar: DownloadStatusBar | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -73,6 +75,19 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       this.playerSurface.setAudioCacheService(this.audioCacheService);
     }
     this.playerSurface.setRepeatMode(this.settings.repeatMode);
+
+    this.downloadStatusBar = new DownloadStatusBar(this, () => this.playerSurface?.cancelDownload());
+    this.playerSurface.onDownloadProgress = (percent: number, error?: string) => {
+      const title = this.getState().currentTrack?.title ?? 'track';
+      if (percent === 0) {
+        this.notices.show('download_started', { title });
+      } else if (percent === 100) {
+        this.notices.show('download_complete', { title });
+      } else if (percent === -1) {
+        this.notices.show('download_failed', { reason: error ?? 'Unknown error' });
+      }
+      this.downloadStatusBar?.update(percent);
+    };
 
     const createView = (leaf: WorkspaceLeaf) => new NotePlayerView(leaf, this, this.playerSurface!, this.playerHostEl!);
     this.registerView(VIEW_TYPE_NOTE_PLAYER, createView);
@@ -134,6 +149,8 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   onunload(): void {
     this.notices.unload();
+    this.downloadStatusBar?.destroy();
+    this.downloadStatusBar = null;
     this.playerSurface?.destroy();
     this.playerSurface = null;
     this.playerHostEl = null;

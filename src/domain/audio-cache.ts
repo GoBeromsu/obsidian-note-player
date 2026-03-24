@@ -9,6 +9,7 @@ export class AudioCacheService implements AudioCachePort {
 	private format: AudioFormat;
 	private ytdlpPath: string;
 	private activeDownloads = new Map<string, ChildProcess>();
+	private downloadPromises = new Map<string, Promise<string>>();
 	private adapter: VaultAdapter;
 	private absBase: string;
 
@@ -50,11 +51,13 @@ export class AudioCacheService implements AudioCachePort {
 		const output = this.absolutePath(videoId);
 		if (existsSync(output)) return output;
 
-		if (this.activeDownloads.has(videoId)) throw new Error('Download already in progress');
+		if (this.downloadPromises.has(videoId)) {
+			return this.downloadPromises.get(videoId)!;
+		}
 
 		this.cleanIntermediate(videoId);
 
-		return new Promise((resolve, reject) => {
+		const p = new Promise<string>((resolve, reject) => {
 			let stderrOutput = '';
 			const proc = spawn(this.ytdlpPath, [
 				'-x', '--audio-format', this.format, '--audio-quality', '0',
@@ -92,10 +95,15 @@ export class AudioCacheService implements AudioCachePort {
 				this.activeDownloads.delete(videoId);
 				reject(err);
 			});
+		}).finally(() => {
+			this.downloadPromises.delete(videoId);
 		});
+		this.downloadPromises.set(videoId, p);
+		return p;
 	}
 
 	cancel(videoId: string): void {
+		this.downloadPromises.delete(videoId);
 		const proc = this.activeDownloads.get(videoId);
 		if (proc) {
 			proc.kill('SIGTERM');
