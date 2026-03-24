@@ -1,7 +1,7 @@
 {
 	"id": "note-player",
 	"name": "Obsidian Note Player",
-	"version": "0.7.0",
+	"version": "0.7.1",
 	"minAppVersion": "0.15.0",
 	"description": "Play note-backed playlists inside Obsidian — YouTube, cached audio, and local files.",
 	"author": "Beomsu Koh",
