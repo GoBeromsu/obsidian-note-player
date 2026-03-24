@@ -21,7 +21,7 @@ export default {
     testResultsFile: 'test-results.xml',
   },
   release: {
-    pluginName: 'youtube-note-playlist',
+    pluginName: 'obsidian-note-player',
     copyFiles: ['main.js', 'manifest.json', 'styles.css'],
     publishFiles: [
       '${{ env.PLUGIN_NAME }}.zip',
