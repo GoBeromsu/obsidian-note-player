@@ -1,6 +1,6 @@
-import { spawn, spawnSync } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import type { AudioCachePort } from '../types/view';
 import type { AudioFormat } from '../types/audio';
 import { AUDIO_MIME_TYPES } from '../types/audio';
@@ -9,6 +9,7 @@ export class AudioCacheService implements AudioCachePort {
 	private cacheDir: string;
 	private format: AudioFormat;
 	private ytdlpPath: string;
+	private activeDownloads = new Map<string, ChildProcess>();
 
 	constructor(basePath: string, format: AudioFormat = 'mp3', ytdlpPath?: string) {
 		this.format = format;
@@ -54,7 +55,9 @@ export class AudioCacheService implements AudioCachePort {
 				'--no-playlist',
 				'-o', join(this.cacheDir, `${videoId}.%(ext)s`),
 				`https://www.youtube.com/watch?v=${videoId}`,
-			]);
+			], { env: this.spawnEnv() });
+
+			this.activeDownloads.set(videoId, proc);
 
 			proc.stderr.on('data', (data: Buffer) => {
 				const line = data.toString();
@@ -70,16 +73,42 @@ export class AudioCacheService implements AudioCachePort {
 			});
 
 			proc.on('close', (code) => {
+				this.activeDownloads.delete(videoId);
 				if (code === 0 && existsSync(output)) {
 					this.cleanIntermediate(videoId);
 					resolve(output);
 				} else {
-					reject(new Error(`yt-dlp exited with code ${code}: ${stderrOutput.slice(-200)}`));
+					reject(new Error(this.parseYtdlpError(stderrOutput)));
 				}
 			});
 
-			proc.on('error', (err) => reject(err));
+			proc.on('error', (err) => {
+				this.activeDownloads.delete(videoId);
+				reject(err);
+			});
 		});
+	}
+
+	cancel(videoId: string): void {
+		const proc = this.activeDownloads.get(videoId);
+		if (proc) {
+			proc.kill('SIGTERM');
+			this.activeDownloads.delete(videoId);
+			this.cleanIntermediate(videoId);
+		}
+	}
+
+	isAvailable(): boolean {
+		return AudioCacheService.isAvailable(this.ytdlpPath);
+	}
+
+	/** Obsidian's process.env.PATH often excludes Homebrew/user paths.
+	 *  Ensure the directory containing yt-dlp (and likely ffmpeg) is on PATH. */
+	private spawnEnv(): NodeJS.ProcessEnv {
+		const ytdlpDir = dirname(this.ytdlpPath);
+		const currentPath = process.env.PATH ?? '';
+		if (currentPath.split(':').includes(ytdlpDir)) return { ...process.env };
+		return { ...process.env, PATH: `${ytdlpDir}:${currentPath}` };
 	}
 
 	private cleanIntermediate(videoId: string): void {
@@ -89,6 +118,15 @@ export class AudioCacheService implements AudioCachePort {
 				unlinkSync(join(this.cacheDir, file));
 			}
 		}
+	}
+
+	private parseYtdlpError(stderr: string): string {
+		if (/Video unavailable/i.test(stderr)) return 'This video is unavailable or has been removed.';
+		if (/Sign in|age/i.test(stderr)) return 'This video requires age verification.';
+		if (/geo|country/i.test(stderr)) return 'This video is not available in your region.';
+		if (/private/i.test(stderr)) return 'This video is private.';
+		if (/Network|Unable to connect|Connection/i.test(stderr)) return 'Network error — check your connection.';
+		return stderr.slice(-100) || 'Unknown error.';
 	}
 
 	static isAvailable(ytdlpPath?: string): boolean {

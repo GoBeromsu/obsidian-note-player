@@ -66,6 +66,8 @@ export interface AudioCachePort {
 	hasCached(videoId: string): boolean;
 	getFileUrl(videoId: string): string;
 	download(videoId: string, onProgress: (percent: number) => void): Promise<string>;
+	cancel(videoId: string): void;
+	isAvailable(): boolean;
 }
 
 export interface VaultWriter {
