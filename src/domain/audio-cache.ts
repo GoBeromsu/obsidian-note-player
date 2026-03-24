@@ -1,23 +1,25 @@
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { dirname, join } from 'path';
-import type { AudioCachePort } from '../types/view';
+import type { AudioCachePort, VaultAdapter } from '../types/view';
 import type { AudioFormat } from '../types/audio';
-import { AUDIO_MIME_TYPES } from '../types/audio';
 
 export class AudioCacheService implements AudioCachePort {
-	private cacheDir: string;
+	private cacheDir: string;        // vault-relative
 	private format: AudioFormat;
 	private ytdlpPath: string;
 	private activeDownloads = new Map<string, ChildProcess>();
+	private adapter: VaultAdapter;
+	private absBase: string;
 
-	constructor(basePath: string, format: AudioFormat = 'mp3', ytdlpPath?: string) {
+	constructor(vaultBasePath: string, adapter: VaultAdapter, format: AudioFormat = 'mp3', ytdlpPath?: string) {
+		this.adapter = adapter;
 		this.format = format;
 		this.ytdlpPath = ytdlpPath ?? AudioCacheService.discoverYtdlpPath();
-		this.cacheDir = join(basePath, '.obsidian', 'plugins', 'obsidian-note-player', 'audio-cache');
-		if (!existsSync(this.cacheDir)) {
-			mkdirSync(this.cacheDir, { recursive: true });
-		}
+		this.absBase = vaultBasePath;
+		this.cacheDir = '.obsidian/plugins/obsidian-note-player/audio-cache';
+		const absPath = join(vaultBasePath, this.cacheDir);
+		if (!existsSync(absPath)) mkdirSync(absPath, { recursive: true });
 	}
 
 	private static discoverYtdlpPath(): string {
@@ -28,23 +30,27 @@ export class AudioCacheService implements AudioCachePort {
 		return '/opt/homebrew/bin/yt-dlp'; // fallback for macOS
 	}
 
-	hasCached(videoId: string): boolean {
-		return existsSync(this.getFilePath(videoId));
+	async hasCached(videoId: string): Promise<boolean> {
+		return this.adapter.exists(this.vaultRelativePath(videoId));
 	}
 
 	getFileUrl(videoId: string): string {
-		const buffer = readFileSync(this.getFilePath(videoId));
-		const blob = new Blob([buffer], { type: AUDIO_MIME_TYPES[this.format] });
-		return URL.createObjectURL(blob);
+		return this.adapter.getResourcePath(this.vaultRelativePath(videoId));
 	}
 
-	private getFilePath(videoId: string): string {
-		return join(this.cacheDir, `${videoId}.${this.format}`);
+	private vaultRelativePath(videoId: string): string {
+		return `${this.cacheDir}/${videoId}.${this.format}`;
+	}
+
+	private absolutePath(videoId: string): string {
+		return join(this.absBase, this.vaultRelativePath(videoId));
 	}
 
 	async download(videoId: string, onProgress: (percent: number) => void): Promise<string> {
-		const output = this.getFilePath(videoId);
+		const output = this.absolutePath(videoId);
 		if (existsSync(output)) return output;
+
+		if (this.activeDownloads.has(videoId)) throw new Error('Download already in progress');
 
 		this.cleanIntermediate(videoId);
 
@@ -53,7 +59,7 @@ export class AudioCacheService implements AudioCachePort {
 			const proc = spawn(this.ytdlpPath, [
 				'-x', '--audio-format', this.format, '--audio-quality', '0',
 				'--no-playlist',
-				'-o', join(this.cacheDir, `${videoId}.%(ext)s`),
+				'-o', join(this.absBase, this.cacheDir, `${videoId}.%(ext)s`),
 				`https://www.youtube.com/watch?v=${videoId}`,
 			], { env: this.spawnEnv() });
 
@@ -112,10 +118,11 @@ export class AudioCacheService implements AudioCachePort {
 	}
 
 	private cleanIntermediate(videoId: string): void {
+		const absDir = join(this.absBase, this.cacheDir);
 		const targetExt = `.${this.format}`;
-		for (const file of readdirSync(this.cacheDir)) {
-			if (file.startsWith(videoId) && !file.endsWith(targetExt)) {
-				unlinkSync(join(this.cacheDir, file));
+		for (const file of readdirSync(absDir)) {
+			if (file.startsWith(videoId + '.') && !file.endsWith(targetExt)) {
+				unlinkSync(join(absDir, file));
 			}
 		}
 	}

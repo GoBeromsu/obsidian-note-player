@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: NotePlayerSettings = {
   lastPlaylistPath: null,
   autoplayEnabled: true,
   audioFormat: 'mp3',
+  repeatMode: 'none',
   debug: false,
 };
 

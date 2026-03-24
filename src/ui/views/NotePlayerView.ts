@@ -101,7 +101,15 @@ export class NotePlayerView extends ItemView {
 			this.render();
 		});
 
-		this.playerSurface.onDownloadProgress = (percent: number) => {
+		this.playerSurface.onDownloadProgress = (percent: number, error?: string) => {
+			const title = this.host.getState().currentTrack?.title ?? 'track';
+			if (percent === 0 && this.downloadProgress === null) {
+				new Notice(`Downloading ${title}...`, 3000);
+			} else if (percent === 100) {
+				new Notice(`Downloaded ${title}.`, 2000);
+			} else if (percent === -1) {
+				new Notice(error ? `Download failed: ${error}` : 'Download failed.', 5000);
+			}
 			this.downloadProgress = percent;
 			this.render();
 		};
@@ -317,6 +325,7 @@ export class NotePlayerView extends ItemView {
 		controls.appendChild(this.createActionButton('Next', 'skip-forward', () => {
 			void this.runAction('Moved to next track', () => this.host.playNext());
 		}, { iconOnly: true }));
+		controls.createDiv({ cls: 'onp-controls-spacer' });
 		controls.appendChild(this.createActionButton('Open note', 'file-text', () => {
 			void this.runAction('', () => this.host.openNote(current.path), false);
 		}, { iconOnly: true }));
@@ -328,13 +337,28 @@ export class NotePlayerView extends ItemView {
 			},
 			{ iconOnly: true, active: state.autoplayEnabled },
 		));
+		if (this.host.toggleRepeatMode) {
+			controls.appendChild(this.createActionButton(
+				state.repeatMode === 'one' ? 'Disable repeat' : 'Repeat one',
+				'repeat-1',
+				() => {
+					void this.runAction(
+						state.repeatMode === 'one' ? 'Repeat off' : 'Repeat one',
+						() => this.host.toggleRepeatMode?.() ?? Promise.resolve(),
+					);
+				},
+				{ iconOnly: true, active: state.repeatMode === 'one' },
+			));
+		}
 
 		// Download progress overlay
 		const isDownloading = this.downloadProgress !== null && this.downloadProgress >= 0 && this.downloadProgress < 100;
 		const downloadFailed = this.downloadProgress === -1;
 
 		if (isDownloading || downloadFailed) {
-			const downloadOverlay = summary.createDiv({ cls: 'onp-download-overlay' });
+			const downloadOverlay = summary.createDiv({
+				cls: downloadFailed ? 'onp-download-overlay is-failed' : 'onp-download-overlay',
+			});
 
 			if (isDownloading) {
 				const progressRow = downloadOverlay.createDiv({ cls: 'onp-download-progress' });

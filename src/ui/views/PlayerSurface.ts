@@ -1,6 +1,6 @@
 import type { AudioCachePort } from '../../types/view';
 import type { PlaylistTrack } from '../../types/view';
-import type { PlaybackState } from '../../types/playback';
+import type { PlaybackState, RepeatMode } from '../../types/playback';
 
 export type { PlaybackState };
 
@@ -18,8 +18,12 @@ export class PlayerSurface {
 	private audioElement: HTMLAudioElement | null = null;
 	private audioCacheService: AudioCachePort | null = null;
 	private suppressCallbacks = false;
+	private isDownloading = false;
+	private downloadToken = 0;
+	private downloadCancelled = false;
+	private repeatMode: RepeatMode = 'none';
 
-	onDownloadProgress: ((percent: number) => void) | null = null;
+	onDownloadProgress: ((percent: number, error?: string) => void) | null = null;
 
 	constructor(
 		host: HTMLElement,
@@ -33,8 +37,18 @@ export class PlayerSurface {
 		this.audioCacheService = service;
 	}
 
+	setRepeatMode(mode: RepeatMode): void {
+		this.repeatMode = mode;
+	}
+
 	async render(track: PlaylistTrack, autoplayEnabled: boolean): Promise<void> {
-		if (this.currentVideoId === track.videoId && this.audioElement) return;
+		if (this.currentVideoId === track.videoId && (this.audioElement || this.isDownloading)) return;
+
+		// Cancel any in-flight download for a different track and invalidate its callbacks
+		if (this.currentVideoId && this.currentVideoId !== track.videoId) {
+			this.downloadToken++; // immediately invalidate stale callbacks
+			this.audioCacheService?.cancel(this.currentVideoId);
+		}
 
 		this.silentPauseAudio();
 		this.audioElement = null;
@@ -46,7 +60,7 @@ export class PlayerSurface {
 
 		const videoId = track.videoId;
 
-		if (this.audioCacheService.hasCached(videoId)) {
+		if (await this.audioCacheService.hasCached(videoId)) {
 			this.mountAudio(this.audioCacheService.getFileUrl(videoId), autoplayEnabled);
 			this.activateTrack(videoId, autoplayEnabled);
 			return;
@@ -54,24 +68,40 @@ export class PlayerSurface {
 
 		this.currentVideoId = videoId;
 		this.currentAutoplay = autoplayEnabled;
+		this.isDownloading = true;
+		const token = ++this.downloadToken;
 		this.onPlaybackChange('paused');
 		this.onDownloadProgress?.(0);
 
 		try {
 			await this.audioCacheService.download(videoId, (percent) => {
+				if (token !== this.downloadToken) return;
 				this.onDownloadProgress?.(percent);
 			});
+			if (token !== this.downloadToken) return;
 			this.onDownloadProgress?.(100);
 			this.mountAudio(this.audioCacheService.getFileUrl(videoId), autoplayEnabled);
 			this.activateTrack(videoId, autoplayEnabled);
-		} catch {
-			this.onDownloadProgress?.(-1);
-			this.renderUnavailable();
+		} catch (e) {
+			if (token !== this.downloadToken) return;
+			if (!this.downloadCancelled) {
+				const reason = e instanceof Error ? e.message : String(e);
+				this.onDownloadProgress?.(-1, reason);
+				this.renderUnavailable();
+			} else {
+				this.currentVideoId = null;
+			}
+		} finally {
+			if (token === this.downloadToken) {
+				this.isDownloading = false;
+				this.downloadCancelled = false;
+			}
 		}
 	}
 
 	cancelDownload(): void {
 		if (this.currentVideoId) {
+			this.downloadCancelled = true;
 			this.audioCacheService?.cancel(this.currentVideoId);
 		}
 	}
@@ -143,6 +173,11 @@ export class PlayerSurface {
 		const audio = new Audio(url);
 		audio.addEventListener('ended', () => {
 			if (this.suppressCallbacks) return;
+			if (this.repeatMode === 'one') {
+				audio.currentTime = 0;
+				void audio.play();
+				return;
+			}
 			this.onPlaybackChange('paused');
 			void this.onEnded();
 		});

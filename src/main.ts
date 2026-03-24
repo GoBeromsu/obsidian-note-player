@@ -53,7 +53,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
     this.vaultBasePath = (this.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? '';
     if (this.vaultBasePath && AudioCacheService.isAvailable()) {
-      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.settings.audioFormat);
+      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat);
     }
 
     this.playerHostEl = document.createElement('div');
@@ -72,6 +72,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     if (this.audioCacheService) {
       this.playerSurface.setAudioCacheService(this.audioCacheService);
     }
+    this.playerSurface.setRepeatMode(this.settings.repeatMode);
 
     const createView = (leaf: WorkspaceLeaf) => new NotePlayerView(leaf, this, this.playerSurface!, this.playerHostEl!);
     this.registerView(VIEW_TYPE_NOTE_PLAYER, createView);
@@ -153,9 +154,10 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     await this.saveData(this.settings);
 
     if (this.vaultBasePath && AudioCacheService.isAvailable()) {
-      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.settings.audioFormat);
+      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat);
       if (this.playerSurface) {
         this.playerSurface.setAudioCacheService(this.audioCacheService);
+        this.playerSurface.setRepeatMode(this.settings.repeatMode);
       }
     }
   }
@@ -177,6 +179,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       currentTrack,
       autoplayEnabled: this.settings.autoplayEnabled,
       playbackState: this.viewPlaybackState,
+      repeatMode: this.settings.repeatMode,
     };
   }
 
@@ -242,7 +245,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   }
 
   async playNext(): Promise<void> {
-    if (this.playback.next(this.currentQueue())) {
+    if (this.playback.next(this.currentQueue(), this.settings.repeatMode)) {
       this.notifyChange();
     }
   }
@@ -315,6 +318,13 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   async toggleAutoplay(): Promise<void> {
     await this.setAutoplayEnabled(!this.settings.autoplayEnabled);
+  }
+
+  async toggleRepeatMode(): Promise<void> {
+    this.settings.repeatMode = this.settings.repeatMode === 'one' ? 'none' : 'one';
+    this.playerSurface?.setRepeatMode(this.settings.repeatMode);
+    await this.saveSettings();
+    this.notifyChange();
   }
 
   getAudioCacheService(): AudioCachePort | null {

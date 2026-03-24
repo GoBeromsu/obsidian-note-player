@@ -1,4 +1,4 @@
-import type { PlaybackState } from './playback';
+import type { PlaybackState, RepeatMode } from './playback';
 
 export interface PlaylistSummary {
 	path: string;
@@ -29,6 +29,7 @@ export interface PlaylistViewState {
 	currentTrack: PlaylistTrack | null;
 	autoplayEnabled: boolean;
 	playbackState: PlaybackState;
+	repeatMode: RepeatMode;
 }
 
 /**
@@ -59,11 +60,17 @@ export interface PlaylistViewHost {
 	refreshCompanionBases?(): Promise<void>;
 	toggleAutoplay?(): Promise<void>;
 	setAutoplayEnabled?(enabled: boolean): Promise<void>;
+	toggleRepeatMode?(): Promise<void>;
 	getAudioCacheService?(): AudioCachePort | null;
 }
 
+export interface VaultAdapter {
+	exists(path: string): Promise<boolean>;
+	getResourcePath(path: string): string;
+}
+
 export interface AudioCachePort {
-	hasCached(videoId: string): boolean;
+	hasCached(videoId: string): Promise<boolean>;
 	getFileUrl(videoId: string): string;
 	download(videoId: string, onProgress: (percent: number) => void): Promise<string>;
 	cancel(videoId: string): void;
