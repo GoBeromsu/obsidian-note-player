@@ -60,7 +60,7 @@ export class NotePlayerView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return 'Note Player';
+		return 'Note player';
 	}
 
 	getIcon(): string {
@@ -207,7 +207,7 @@ export class NotePlayerView extends ItemView {
 		const hero = elements.heroPanel.createDiv({ cls: 'onp-playlist-hero' });
 		const cover = hero.createDiv({ cls: 'onp-hero-cover' });
 		if (coverImage) {
-			cover.style.backgroundImage = `url("${coverImage}")`;
+			cover.setCssProps({ '--onp-cover-image': `url("${coverImage}")` });
 		} else {
 			const icon = cover.createDiv({ cls: 'onp-empty-icon' });
 			setIcon(icon, 'music-4');
@@ -283,7 +283,7 @@ export class NotePlayerView extends ItemView {
 		const summary = playerRail.createDiv({ cls: 'onp-now-playing-summary' });
 		const trackCard = summary.createDiv({ cls: 'onp-track-card onp-track-card--compact onp-player-track-card' });
 		const thumb = trackCard.createDiv({ cls: 'onp-track-thumb' });
-		thumb.style.backgroundImage = `url("${current.thumbnailUrl}")`;
+		thumb.setCssProps({ '--onp-thumb-image': `url("${current.thumbnailUrl}")` });
 
 		const meta = trackCard.createDiv({ cls: 'onp-track-meta' });
 		meta.createDiv({ cls: 'onp-now-playing-kicker', text: 'Now playing' });
@@ -445,7 +445,7 @@ export class NotePlayerView extends ItemView {
 			});
 
 			const thumb = row.createDiv({ cls: 'onp-row-thumb' });
-			thumb.style.backgroundImage = `url("${track.thumbnailUrl}")`;
+			thumb.setCssProps({ '--onp-thumb-image': `url("${track.thumbnailUrl}")` });
 			const thumbPlay = thumb.createDiv({ cls: 'onp-row-thumb-play' });
 			setIcon(thumbPlay, 'play');
 			thumb.addEventListener('click', () => {
@@ -702,9 +702,7 @@ export class NotePlayerView extends ItemView {
 		const nextWidth = `${(ratio * 100).toFixed(2)}%`;
 		const nextTime = `${formatTime(currentTime)} / ${formatTime(duration)}`;
 
-		if (elements.progressFill.style.width !== nextWidth) {
-			elements.progressFill.style.width = nextWidth;
-		}
+		elements.progressFill.setCssProps({ '--onp-progress-width': nextWidth });
 		if (elements.progressTime.textContent !== nextTime) {
 			elements.progressTime.textContent = nextTime;
 		}
@@ -713,11 +711,11 @@ export class NotePlayerView extends ItemView {
 	private async toggleCurrentPlayback(current: PlaylistTrack): Promise<void> {
 		const playbackState = this.host.getState().playbackState;
 		if (playbackState === 'playing') {
-			await this.playerSurface.pause();
+			this.playerSurface.pause();
 			return;
 		}
 
-		const handled = await this.playerSurface.play();
+		const handled = this.playerSurface.play();
 		if (!handled) {
 			await this.host.playTrack(current.path);
 		}

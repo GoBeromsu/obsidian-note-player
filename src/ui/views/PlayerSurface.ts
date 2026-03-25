@@ -107,13 +107,13 @@ export class PlayerSurface {
 		}
 	}
 
-	async play(): Promise<boolean> {
+	play(): boolean {
 		if (!this.audioElement) return false;
 		void this.audioElement.play().catch(() => { /* interrupted by pause — benign */ });
 		return true;
 	}
 
-	async pause(): Promise<boolean> {
+	pause(): boolean {
 		if (!this.audioElement) return false;
 		this.audioElement.pause();
 		return true;

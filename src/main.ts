@@ -55,7 +55,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
     this.vaultBasePath = (this.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? '';
     if (this.vaultBasePath && AudioCacheService.isAvailable()) {
-      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat);
+      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat, undefined, this.app.vault.configDir);
     }
 
     this.playerHostEl = document.createElement('div');
@@ -93,13 +93,13 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     this.registerView(VIEW_TYPE_NOTE_PLAYER, createView);
     this.registerView(VIEW_TYPE_LEGACY, createView);
 
-    this.addRibbonIcon('play-square', 'Open Note Player', () => {
+    this.addRibbonIcon('play-square', 'Open note player', () => {
       void this.activateView();
     });
 
     this.addCommand({
       id: 'open-youtube-note-playlist',
-      name: 'Open Note Player',
+      name: 'Open note player',
       callback: () => {
         void this.activateView();
       },
@@ -171,7 +171,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     await this.saveData(this.settings);
 
     if (this.vaultBasePath && AudioCacheService.isAvailable()) {
-      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat);
+      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat, undefined, this.app.vault.configDir);
       if (this.playerSurface) {
         this.playerSurface.setAudioCacheService(this.audioCacheService);
         this.playerSurface.setRepeatMode(this.settings.repeatMode);
@@ -250,21 +250,24 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     await this.createPlaylistNote(name);
   }
 
-  async playTrack(path: string): Promise<void> {
+  playTrack(path: string): Promise<void> {
     this.playback.play(path, this.library.tracks);
     this.notifyChange();
+    return Promise.resolve();
   }
 
-  async playPrevious(): Promise<void> {
+  playPrevious(): Promise<void> {
     if (this.playback.previous(this.currentQueue())) {
       this.notifyChange();
     }
+    return Promise.resolve();
   }
 
-  async playNext(): Promise<void> {
+  playNext(): Promise<void> {
     if (this.playback.next(this.currentQueue(), this.settings.repeatMode)) {
       this.notifyChange();
     }
+    return Promise.resolve();
   }
 
   async addTrackToPlaylist(trackPath: string): Promise<void> {
@@ -410,13 +413,13 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       ...this.app.workspace.getLeavesOfType(VIEW_TYPE_LEGACY),
     ];
     if (existing.length > 0) {
-      this.app.workspace.revealLeaf(existing[0]);
+      void this.app.workspace.revealLeaf(existing[0]);
       return;
     }
 
     const leaf = this.app.workspace.getLeaf('tab');
     await leaf.setViewState({ type: VIEW_TYPE_NOTE_PLAYER, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    void this.app.workspace.revealLeaf(leaf);
   }
 
   private registerVaultRefreshEvents(): void {

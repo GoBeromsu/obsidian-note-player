@@ -101,6 +101,7 @@
 	border-radius: var(--radius-m);
 	border: 1px solid var(--background-modifier-border);
 	background-color: var(--background-primary-alt);
+	background-image: var(--onp-cover-image);
 	background-size: cover;
 	background-position: center;
 	display: flex;
@@ -196,6 +197,7 @@
 	border-radius: var(--radius-m);
 	border: 1px solid var(--background-modifier-border);
 	background-color: var(--background-primary-alt);
+	background-image: var(--onp-thumb-image);
 	background-size: cover;
 	background-position: center;
 }
@@ -247,7 +249,7 @@
 
 .onp-progress-fill {
 	height: 100%;
-	width: 0%;
+	width: var(--onp-progress-width, 0%);
 	border-radius: inherit;
 	background: var(--interactive-accent);
 	pointer-events: none;
@@ -482,6 +484,7 @@
 	border-radius: var(--radius-m);
 	border: 1px solid var(--background-modifier-border);
 	background-color: var(--background-primary-alt);
+	background-image: var(--onp-thumb-image);
 	background-size: cover;
 	background-position: center;
 	cursor: pointer;

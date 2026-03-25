@@ -13,12 +13,12 @@ export class AudioCacheService implements AudioCachePort {
 	private adapter: VaultAdapter;
 	private absBase: string;
 
-	constructor(vaultBasePath: string, adapter: VaultAdapter, format: AudioFormat = 'mp3', ytdlpPath?: string) {
+	constructor(vaultBasePath: string, adapter: VaultAdapter, format: AudioFormat = 'mp3', ytdlpPath?: string, configDir = '.obsidian') {
 		this.adapter = adapter;
 		this.format = format;
 		this.ytdlpPath = ytdlpPath ?? AudioCacheService.discoverYtdlpPath();
 		this.absBase = vaultBasePath;
-		this.cacheDir = '.obsidian/plugins/obsidian-note-player/audio-cache';
+		this.cacheDir = `${configDir}/plugins/obsidian-note-player/audio-cache`;
 		const absPath = join(vaultBasePath, this.cacheDir);
 		if (!existsSync(absPath)) mkdirSync(absPath, { recursive: true });
 	}
