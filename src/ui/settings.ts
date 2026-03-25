@@ -96,8 +96,6 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 
 		const getProperties = () => collectVaultProperties(this.app);
 
-		new Setting(containerEl).setHeading().setName('Obsidian Note Player');
-
 		new Setting(containerEl)
 			.setName('Playlist folder')
 			.setDesc('New playlist notes are created in this vault folder.')
