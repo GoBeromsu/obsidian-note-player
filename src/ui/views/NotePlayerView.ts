@@ -536,7 +536,7 @@ export class NotePlayerView extends ItemView {
 		if (this.host.refreshCompanionBases) {
 			menu.addItem((item) =>
 				item
-					.setTitle('Refresh companion Bases files')
+					.setTitle('Refresh companion bases files')
 					.setIcon('layout-grid')
 					.onClick(() => {
 						void this.runAction('Refreshed companion Bases files', () => this.host.refreshCompanionBases?.() ?? Promise.resolve());

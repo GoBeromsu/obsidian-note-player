@@ -113,7 +113,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				text.inputEl.addClass('onp-setting-input-full');
 			});
 
-		new Setting(containerEl).setHeading().setName('Music Note Mapping');
+		new Setting(containerEl).setHeading().setName('Music note mapping');
 
 		new Setting(containerEl)
 			.setName('URL properties')
@@ -163,7 +163,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				new CommaPropertySuggest(this.app, text.inputEl, getProperties);
 			});
 
-		new Setting(containerEl).setHeading().setName('Playlist Note Schema');
+		new Setting(containerEl).setHeading().setName('Playlist note schema');
 
 		new Setting(containerEl)
 			.setName('Track list property')
@@ -240,18 +240,18 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				new PropertySuggest(this.app, text.inputEl, getProperties);
 			});
 
-		new Setting(containerEl).setHeading().setName('Companion Bases');
+		new Setting(containerEl).setHeading().setName('Companion bases');
 		containerEl.createEl('p', {
-			text: 'The plugin can generate Music.base and Playlists.base beside your playlist folder. For music-note mapping lists, the first property becomes the Bases column.',
+			text: 'The plugin can generate Music.base and Playlists.base beside your playlist folder. For music-note mapping lists, the first property becomes the bases column.',
 			cls: 'setting-item-description',
 		});
 
 		new Setting(containerEl)
-			.setName('Refresh companion Bases files')
-			.setDesc('Rewrite the companion Bases files to match the current mapping.')
+			.setName('Refresh companion bases files')
+			.setDesc('Rewrite the companion bases files to match the current mapping.')
 			.addButton((button) =>
 				button
-					.setButtonText('Refresh Bases')
+					.setButtonText('Refresh bases')
 					.onClick(async () => {
 						await this.plugin.refreshCompanionBases();
 					}),

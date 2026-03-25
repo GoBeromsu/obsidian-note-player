@@ -115,7 +115,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
     this.addCommand({
       id: 'refresh-youtube-playlist-bases',
-      name: 'Create or refresh companion Bases files',
+      name: 'Create or refresh companion bases files',
       callback: () => {
         void this.refreshCompanionBases();
       },
