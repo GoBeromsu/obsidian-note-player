@@ -55,28 +55,28 @@ describe('AudioCacheService', () => {
 	describe('path construction uses configured format extension', () => {
 		it('uses mp3 extension by default', async () => {
 			const adapter = makeAdapter({ exists: vi.fn().mockResolvedValue(true) });
-			const service = new AudioCacheService(BASE_PATH, adapter, 'mp3', MOCK_YTDLP);
+			const service = new AudioCacheService(BASE_PATH, adapter, 'mp3', '.obsidian', MOCK_YTDLP);
 			expect(await service.hasCached('abc123')).toBe(true);
 			expect(vi.mocked(adapter.exists)).toHaveBeenCalledWith(`${CACHE_DIR}/abc123.mp3`);
 		});
 
 		it('uses wav extension when format is wav', async () => {
 			const adapter = makeAdapter({ exists: vi.fn().mockResolvedValue(true) });
-			const service = new AudioCacheService(BASE_PATH, adapter, 'wav', MOCK_YTDLP);
+			const service = new AudioCacheService(BASE_PATH, adapter, 'wav', '.obsidian', MOCK_YTDLP);
 			expect(await service.hasCached('abc123')).toBe(true);
 			expect(vi.mocked(adapter.exists)).toHaveBeenCalledWith(`${CACHE_DIR}/abc123.wav`);
 		});
 
 		it('uses opus extension when format is opus', async () => {
 			const adapter = makeAdapter({ exists: vi.fn().mockResolvedValue(true) });
-			const service = new AudioCacheService(BASE_PATH, adapter, 'opus', MOCK_YTDLP);
+			const service = new AudioCacheService(BASE_PATH, adapter, 'opus', '.obsidian', MOCK_YTDLP);
 			await service.hasCached('abc123');
 			expect(vi.mocked(adapter.exists)).toHaveBeenCalledWith(`${CACHE_DIR}/abc123.opus`);
 		});
 
 		it('uses aac extension when format is aac', async () => {
 			const adapter = makeAdapter({ exists: vi.fn().mockResolvedValue(true) });
-			const service = new AudioCacheService(BASE_PATH, adapter, 'aac', MOCK_YTDLP);
+			const service = new AudioCacheService(BASE_PATH, adapter, 'aac', '.obsidian', MOCK_YTDLP);
 			await service.hasCached('abc123');
 			expect(vi.mocked(adapter.exists)).toHaveBeenCalledWith(`${CACHE_DIR}/abc123.aac`);
 		});
@@ -87,7 +87,7 @@ describe('AudioCacheService', () => {
 
 		it.each(formats)('getFileUrl returns app:// URL for %s', (format) => {
 			const adapter = makeAdapter();
-			const service = new AudioCacheService(BASE_PATH, adapter, format, MOCK_YTDLP);
+			const service = new AudioCacheService(BASE_PATH, adapter, format, '.obsidian', MOCK_YTDLP);
 			const url = service.getFileUrl('abc123');
 			expect(vi.mocked(adapter.getResourcePath)).toHaveBeenCalledWith(`${CACHE_DIR}/abc123.${format}`);
 			expect(url).toMatch(/^app:\/\//);
@@ -98,7 +98,7 @@ describe('AudioCacheService', () => {
 		it('uses discovered path when which yt-dlp succeeds', () => {
 			mockSpawnSync(0, `${MOCK_YTDLP}\n`);
 			const adapter = makeAdapter();
-			expect(() => new AudioCacheService(BASE_PATH, adapter, 'mp3')).not.toThrow();
+			expect(() => new AudioCacheService(BASE_PATH, adapter, 'mp3', '.obsidian')).not.toThrow();
 			mockSpawnSync(0, '');
 			expect(AudioCacheService.isAvailable(MOCK_YTDLP)).toBe(true);
 		});
@@ -113,7 +113,7 @@ describe('AudioCacheService', () => {
 				signal: null,
 			} as ReturnType<typeof cp.spawnSync>);
 			const adapter = makeAdapter();
-			expect(() => new AudioCacheService(BASE_PATH, adapter, 'mp3')).not.toThrow();
+			expect(() => new AudioCacheService(BASE_PATH, adapter, 'mp3', '.obsidian')).not.toThrow();
 		});
 
 		it('isAvailable returns true when yt-dlp responds to --version', () => {

@@ -55,7 +55,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
     this.vaultBasePath = (this.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? '';
     if (this.vaultBasePath && AudioCacheService.isAvailable()) {
-      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat, undefined, this.app.vault.configDir);
+      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat, this.app.vault.configDir);
     }
 
     this.playerHostEl = document.createElement('div');
@@ -171,7 +171,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     await this.saveData(this.settings);
 
     if (this.vaultBasePath && AudioCacheService.isAvailable()) {
-      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat, undefined, this.app.vault.configDir);
+      this.audioCacheService = new AudioCacheService(this.vaultBasePath, this.app.vault.adapter, this.settings.audioFormat, this.app.vault.configDir);
       if (this.playerSurface) {
         this.playerSurface.setAudioCacheService(this.audioCacheService);
         this.playerSurface.setRepeatMode(this.settings.repeatMode);
@@ -382,7 +382,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   }
 
   private async createPlaylistNote(name: string, seedTrackPaths: string[] = []): Promise<void> {
-    const filePath = await this.getAvailablePlaylistPath(name);
+    const filePath = this.getAvailablePlaylistPath(name);
     await this.ensureFolder(this.settings.playlistFolder);
     await this.app.vault.create(
       filePath,

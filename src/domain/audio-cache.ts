@@ -13,7 +13,7 @@ export class AudioCacheService implements AudioCachePort {
 	private adapter: VaultAdapter;
 	private absBase: string;
 
-	constructor(vaultBasePath: string, adapter: VaultAdapter, format: AudioFormat = 'mp3', ytdlpPath?: string, configDir = '.obsidian') {
+	constructor(vaultBasePath: string, adapter: VaultAdapter, format: AudioFormat = 'mp3', configDir: string, ytdlpPath?: string) {
 		this.adapter = adapter;
 		this.format = format;
 		this.ytdlpPath = ytdlpPath ?? AudioCacheService.discoverYtdlpPath();
