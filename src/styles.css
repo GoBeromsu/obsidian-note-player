@@ -639,3 +639,11 @@
 	gap: 8px;
 	padding: 10px 0;
 }
+
+.onp-hidden {
+	display: none;
+}
+
+.onp-setting-input-full {
+	width: 100%;
+}

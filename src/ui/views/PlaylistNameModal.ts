@@ -13,7 +13,7 @@ export class PlaylistNameModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createEl('h3', { text: 'Create playlist' });
+		new Setting(contentEl).setHeading().setName('Create playlist');
 		contentEl.createEl('p', {
 			text: 'This creates a note-backed playlist note in your configured playlist folder.',
 		});

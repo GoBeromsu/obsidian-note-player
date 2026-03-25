@@ -96,7 +96,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 
 		const getProperties = () => collectVaultProperties(this.app);
 
-		containerEl.createEl('h2', { text: 'Obsidian Note Player' });
+		new Setting(containerEl).setHeading().setName('Obsidian Note Player');
 
 		new Setting(containerEl)
 			.setName('Playlist folder')
@@ -110,10 +110,10 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						await this.plugin.refresh();
 					});
-				text.inputEl.style.width = '100%';
+				text.inputEl.addClass('onp-setting-input-full');
 			});
 
-		containerEl.createEl('h3', { text: 'Music Note Mapping' });
+		new Setting(containerEl).setHeading().setName('Music Note Mapping');
 
 		new Setting(containerEl)
 			.setName('URL properties')
@@ -127,7 +127,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						await this.plugin.refresh();
 					});
-				text.inputEl.style.width = '100%';
+				text.inputEl.addClass('onp-setting-input-full');
 				new CommaPropertySuggest(this.app, text.inputEl, getProperties);
 			});
 
@@ -143,7 +143,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						await this.plugin.refresh();
 					});
-				text.inputEl.style.width = '100%';
+				text.inputEl.addClass('onp-setting-input-full');
 				new CommaPropertySuggest(this.app, text.inputEl, getProperties);
 			});
 
@@ -159,11 +159,11 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						await this.plugin.refresh();
 					});
-				text.inputEl.style.width = '100%';
+				text.inputEl.addClass('onp-setting-input-full');
 				new CommaPropertySuggest(this.app, text.inputEl, getProperties);
 			});
 
-		containerEl.createEl('h3', { text: 'Playlist Note Schema' });
+		new Setting(containerEl).setHeading().setName('Playlist Note Schema');
 
 		new Setting(containerEl)
 			.setName('Track list property')
@@ -240,7 +240,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				new PropertySuggest(this.app, text.inputEl, getProperties);
 			});
 
-		containerEl.createEl('h3', { text: 'Companion Bases' });
+		new Setting(containerEl).setHeading().setName('Companion Bases');
 		containerEl.createEl('p', {
 			text: 'The plugin can generate Music.base and Playlists.base beside your playlist folder. For music-note mapping lists, the first property becomes the Bases column.',
 			cls: 'setting-item-description',
@@ -257,7 +257,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 					}),
 			);
 
-		containerEl.createEl('h3', { text: 'Audio fallback' });
+		new Setting(containerEl).setHeading().setName('Audio fallback');
 		containerEl.createEl('p', {
 			text: 'When YouTube embed playback is unavailable, the plugin downloads audio via yt-dlp.',
 			cls: 'setting-item-description',
