@@ -252,7 +252,7 @@ export class NotePlayerView extends ItemView {
 
 		const current = state.currentTrack;
 		if (!current) {
-			elements.playerPanel.style.display = 'none';
+			elements.playerPanel.addClass('onp-hidden');
 			this.lastRenderedTrackPath = null;
 			elements.progressBar = null;
 			elements.progressFill = null;
@@ -269,7 +269,7 @@ export class NotePlayerView extends ItemView {
 		// Show install instructions when yt-dlp is not available
 		const audioCacheService = this.host.getAudioCacheService?.();
 		if (audioCacheService && !audioCacheService.isAvailable()) {
-			elements.playerPanel.style.display = '';
+			elements.playerPanel.removeClass('onp-hidden');
 			const installNotice = elements.playerPanel.createDiv({ cls: 'onp-download-overlay' });
 			installNotice.createDiv({ cls: 'onp-download-text', text: 'Install yt-dlp to play music' });
 			installNotice.createDiv({ cls: 'onp-download-text onp-install-hint', text: 'brew install yt-dlp' });
@@ -278,7 +278,7 @@ export class NotePlayerView extends ItemView {
 
 		const playbackState = state.playbackState;
 
-		elements.playerPanel.style.display = '';
+		elements.playerPanel.removeClass('onp-hidden');
 		const playerRail = elements.playerPanel.createDiv({ cls: 'onp-now-playing-shell' });
 		const summary = playerRail.createDiv({ cls: 'onp-now-playing-summary' });
 		const trackCard = summary.createDiv({ cls: 'onp-track-card onp-track-card--compact onp-player-track-card' });

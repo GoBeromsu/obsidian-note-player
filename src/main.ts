@@ -615,7 +615,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     return match?.path ?? fileName;
   }
 
-  private async getAvailablePlaylistPath(name: string): Promise<string> {
+  private getAvailablePlaylistPath(name: string): string {
     const baseName = sanitizeFileName(name);
     let attempt = normalizePath(`${this.settings.playlistFolder}/${baseName}.md`);
     let index = 2;
