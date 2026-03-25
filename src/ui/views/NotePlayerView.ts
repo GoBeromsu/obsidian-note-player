@@ -67,7 +67,7 @@ export class NotePlayerView extends ItemView {
 		return 'play-square';
 	}
 
-	async onOpen(): Promise<void> {
+	onOpen(): Promise<void> {
 		const root = this.containerEl.children[1] as HTMLElement;
 		root.empty();
 		root.addClass('onp-view-root');
@@ -101,9 +101,10 @@ export class NotePlayerView extends ItemView {
 		});
 
 		this.render();
+		return Promise.resolve();
 	}
 
-	async onClose(): Promise<void> {
+	onClose(): Promise<void> {
 		this.unsubscribe?.();
 		this.unsubscribe = null;
 		this.resizeObserver?.disconnect();
@@ -113,6 +114,7 @@ export class NotePlayerView extends ItemView {
 			this.playerHostEl.parentElement.removeChild(this.playerHostEl);
 		}
 		this.elements = null;
+		return Promise.resolve();
 	}
 
 	private render(): void {

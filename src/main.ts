@@ -99,7 +99,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
     this.addCommand({
       id: 'open-youtube-note-playlist',
-      name: 'Open note player',
+      name: 'Open player view',
       callback: () => {
         void this.activateView();
       },
