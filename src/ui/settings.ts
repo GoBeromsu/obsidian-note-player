@@ -101,7 +101,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 			.setDesc('New playlist notes are created in this vault folder.')
 			.addText((text) => {
 				text
-					.setPlaceholder('90. System/Playlists')
+					.setPlaceholder('90. System/playlists')
 					.setValue(this.plugin.settings.playlistFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.playlistFolder = value.trim();
@@ -240,7 +240,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl).setHeading().setName('Companion bases');
 		containerEl.createEl('p', {
-			text: 'The plugin can generate Music.base and Playlists.base beside your playlist folder. For music-note mapping lists, the first property becomes the bases column.',
+			text: 'The plugin can generate music.base and playlists.base beside your playlist folder. For music-note mapping lists, the first property becomes the bases column.',
 			cls: 'setting-item-description',
 		});
 

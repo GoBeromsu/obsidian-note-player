@@ -13,7 +13,7 @@ export class DownloadStatusBar {
 		const item = plugin.addStatusBarItem();
 		const container = item.createEl('a', { cls: 'onp-status' });
 		this.iconEl = container.createDiv({ cls: 'onp-status-icon' });
-		this.msgEl = container.createSpan({ cls: 'onp-status-msg', text: ' ONP' });
+		this.msgEl = container.createSpan({ cls: 'onp-status-msg', text: ' Note player' });
 		setIcon(this.iconEl, 'music');
 
 		plugin.registerDomEvent(container, 'click', () => {
@@ -53,6 +53,6 @@ export class DownloadStatusBar {
 		this.completionTimer = null;
 		this.isDownloading = false;
 		setIcon(this.iconEl, 'music');
-		this.msgEl.setText(' ONP');
+		this.msgEl.setText(' Note player');
 	}
 }

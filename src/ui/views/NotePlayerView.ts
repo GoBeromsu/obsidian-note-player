@@ -517,7 +517,7 @@ export class NotePlayerView extends ItemView {
 		if (this.host.openBase) {
 			menu.addItem((item) =>
 				item
-					.setTitle('Open Music.base')
+					.setTitle('Open music.base')
 					.setIcon('table-2')
 					.onClick(() => {
 						void this.runAction('', () => this.host.openBase?.('music') ?? Promise.resolve(), false);
@@ -525,7 +525,7 @@ export class NotePlayerView extends ItemView {
 			);
 			menu.addItem((item) =>
 				item
-					.setTitle('Open Playlists.base')
+					.setTitle('Open playlists.base')
 					.setIcon('files')
 					.onClick(() => {
 						void this.runAction('', () => this.host.openBase?.('playlists') ?? Promise.resolve(), false);
