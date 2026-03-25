@@ -236,7 +236,7 @@ export class NotePlayerView extends ItemView {
 			}, { cta: true, iconOnly: true }));
 		}
 
-		actions.appendChild(this.createMenuButton('Playlist actions', 'more-vertical', (event) => {
+		actions.appendChild(this.createIconButton('Playlist actions', 'more-vertical', (event) => {
 			this.openPlaylistMenu(event, selectedPlaylist);
 		}));
 	}
@@ -474,7 +474,7 @@ export class NotePlayerView extends ItemView {
 				eqBars.createDiv({ cls: 'onp-eq-bar' });
 				eqBars.createDiv({ cls: 'onp-eq-bar' });
 			}
-			rowActions.appendChild(this.createMenuButton('Track actions', 'more-vertical', (event) => {
+			rowActions.appendChild(this.createIconButton('Track actions', 'more-vertical', (event) => {
 				this.openTrackMenu(event, track);
 			}));
 		});
@@ -638,25 +638,6 @@ export class NotePlayerView extends ItemView {
 	}
 
 	private createIconButton(
-		label: string,
-		icon: string,
-		onClick: () => void,
-	): HTMLButtonElement {
-		const button = document.createElement('button');
-		button.type = 'button';
-		button.className = 'clickable-icon onp-icon-button';
-		button.setAttribute('aria-label', label);
-		button.setAttribute('title', label);
-		setIcon(button, icon);
-		button.addEventListener('click', (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			onClick();
-		});
-		return button;
-	}
-
-	private createMenuButton(
 		label: string,
 		icon: string,
 		onClick: (event: MouseEvent) => void,
