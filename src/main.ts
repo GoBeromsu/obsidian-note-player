@@ -162,7 +162,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   }
 
   async loadSettings(): Promise<void> {
-    const loaded = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as NotePlayerSettings;
+    const loaded = { ...DEFAULT_SETTINGS, ...(await this.loadData() as Partial<NotePlayerSettings>) } as NotePlayerSettings;
     this.settings = normalizeSettings(loaded);
   }
 
