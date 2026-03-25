@@ -204,7 +204,7 @@ export class PluginNotices {
 					this.show('notice_muted', {}, { timeout: 2000 });
 				})
 				.catch((err: unknown) => {
-					console.error(`[${this.prefix}] Failed to mute notice: ${err instanceof Error ? err.message : String(err)}`);
+					console.error(`[${this.prefix}] Failed to mute notice:`, err);
 				});
 		});
 		return button;

@@ -21,20 +21,6 @@ function run(command, args) {
   }
 }
 
-function runCapture(command, args) {
-  const result = spawnSync(command, args, { encoding: 'utf8' });
-  if (result.error) {
-    console.error(`Failed to run ${command}: ${result.error.message}`);
-    process.exit(1);
-  }
-  if ((result.status ?? 0) !== 0) {
-    process.stderr.write(result.stderr ?? '');
-    process.exit(result.status ?? 1);
-  }
-
-  return (result.stdout ?? '').trim();
-}
-
 const level = process.argv[2];
 if (!RELEASE_LEVELS.has(level)) {
   console.error(`Usage: node scripts/release.mjs <patch|minor|major>`);
@@ -48,6 +34,8 @@ if (pkg.scripts?.['sync:check']) {
 }
 run(pnpm, ['run', 'ci']);
 
+// After CI (which runs build), manifest.json may be reformatted by esbuild.
+// Normalize to tab-indented format and auto-commit if dirty to unblock npm version.
 if (fs.existsSync('manifest.json')) {
   const raw = fs.readFileSync('manifest.json', 'utf8');
   const normalized = `${JSON.stringify(JSON.parse(raw), null, '\t')}\n`;
@@ -58,19 +46,4 @@ if (fs.existsSync('manifest.json')) {
   }
 }
 
-const headBeforeVersion = runCapture('git', ['rev-parse', 'HEAD']);
 run(pnpm, ['version', level]);
-
-const headAfterVersion = runCapture('git', ['rev-parse', 'HEAD']);
-if (headAfterVersion === headBeforeVersion) {
-  const nextPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  const tagPrefix = runCapture('npm', ['config', 'get', 'tag-version-prefix', '--location=project']);
-  const tagName = `${tagPrefix}${nextPkg.version}`;
-  const releasableFiles = ['package.json', 'manifest.json', 'versions.json'].filter((file) => fs.existsSync(file));
-
-  run('git', ['add', ...releasableFiles]);
-  run('git', ['commit', '-m', `chore(release): ${nextPkg.version}`]);
-  run('git', ['tag', tagName]);
-  run('git', ['push']);
-  run('git', ['push', '--tags']);
-}
