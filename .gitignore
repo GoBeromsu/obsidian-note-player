@@ -24,3 +24,4 @@ test-*.png
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
 .claude/
+.omc/state/hud-stdin-cache.json
