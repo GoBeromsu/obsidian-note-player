@@ -311,11 +311,11 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
     const nextTrackPaths = [...playlist.trackPaths];
     const [movedPath] = nextTrackPaths.splice(fromIndex, 1);
-    nextTrackPaths.splice(toIndex, 0, movedPath);
+    nextTrackPaths.splice(toIndex, 0, movedPath!);
 
     const nextTracks = [...playlist.tracks];
     const [movedTrack] = nextTracks.splice(fromIndex, 1);
-    nextTracks.splice(toIndex, 0, movedTrack);
+    nextTracks.splice(toIndex, 0, movedTrack!);
 
     playlist.trackPaths = nextTrackPaths;
     playlist.tracks = nextTracks;
@@ -413,7 +413,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       ...this.app.workspace.getLeavesOfType(VIEW_TYPE_LEGACY),
     ];
     if (existing.length > 0) {
-      void this.app.workspace.revealLeaf(existing[0]);
+      void this.app.workspace.revealLeaf(existing[0]!);
       return;
     }
 

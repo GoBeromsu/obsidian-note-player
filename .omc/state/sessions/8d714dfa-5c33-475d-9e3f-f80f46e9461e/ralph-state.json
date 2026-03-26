@@ -1,0 +1,11 @@
+{
+  "active": true,
+  "iteration": 1,
+  "max_iterations": 100,
+  "started_at": "2026-03-25T10:15:00.782Z",
+  "prompt": "/ralph bot command확인하고, 해결한 다음 겪은 문제를 /skill-creator로 /obsidian-publish를 강화하세요",
+  "session_id": "8d714dfa-5c33-475d-9e3f-f80f46e9461e",
+  "project_path": "/Users/beomsu/Documents/Dev/Obsidian-Plugins/youtube-note-playlist",
+  "linked_ultrawork": true,
+  "last_checked_at": "2026-03-25T10:15:00.783Z"
+}

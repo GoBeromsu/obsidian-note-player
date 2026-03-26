@@ -17,7 +17,7 @@ export class PlaybackStateManager {
 		if (queue.length === 0) return false;
 
 		if (!this.currentTrackPath) {
-			this.currentTrackPath = queue[0].path;
+			this.currentTrackPath = queue[0]!.path;
 			return true;
 		}
 
@@ -26,7 +26,7 @@ export class PlaybackStateManager {
 		const currentIndex = queue.findIndex((track) => track.path === this.currentTrackPath);
 		if (currentIndex < 0 || currentIndex >= queue.length - 1) return false;
 
-		this.currentTrackPath = queue[currentIndex + 1].path;
+		this.currentTrackPath = queue[currentIndex + 1]!.path;
 		return true;
 	}
 
@@ -34,14 +34,14 @@ export class PlaybackStateManager {
 		if (queue.length === 0) return false;
 
 		if (!this.currentTrackPath) {
-			this.currentTrackPath = queue[0].path;
+			this.currentTrackPath = queue[0]!.path;
 			return true;
 		}
 
 		const currentIndex = queue.findIndex((track) => track.path === this.currentTrackPath);
 		if (currentIndex <= 0) return false;
 
-		this.currentTrackPath = queue[currentIndex - 1].path;
+		this.currentTrackPath = queue[currentIndex - 1]!.path;
 		return true;
 	}
 

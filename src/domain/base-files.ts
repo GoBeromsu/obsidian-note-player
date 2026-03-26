@@ -41,12 +41,12 @@ export function getCompanionBaseFolder(playlistFolder: string): string {
 }
 
 function createMusicBaseContent(propertyMapping: YoutubePlaylistPropertyMapping): string {
-	const artistProperty = firstProperty(propertyMapping.musicArtistProperties, DEFAULT_PROPERTY_MAPPING.musicArtistProperties[0]);
+	const artistProperty = firstProperty(propertyMapping.musicArtistProperties, DEFAULT_PROPERTY_MAPPING.musicArtistProperties[0]!);
 	const thumbnailProperty = firstProperty(
 		propertyMapping.musicThumbnailProperties,
-		DEFAULT_PROPERTY_MAPPING.musicThumbnailProperties[0],
+		DEFAULT_PROPERTY_MAPPING.musicThumbnailProperties[0]!,
   );
-  const urlProperty = firstProperty(propertyMapping.musicUrlProperties, DEFAULT_PROPERTY_MAPPING.musicUrlProperties[0]);
+  const urlProperty = firstProperty(propertyMapping.musicUrlProperties, DEFAULT_PROPERTY_MAPPING.musicUrlProperties[0]!);
 
 	return [
 		'filters:',

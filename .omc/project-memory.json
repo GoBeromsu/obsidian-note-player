@@ -1,0 +1,206 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1774426785900,
+  "projectRoot": "/Users/beomsu/Documents/Dev/Obsidian-Plugins/youtube-note-playlist",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "esbuild",
+        "version": "0.25.0",
+        "category": "build"
+      },
+      {
+        "name": "vitest",
+        "version": "2.0.0",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "pnpm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "pnpm build",
+    "testCommand": "pnpm test",
+    "lintCommand": "pnpm lint",
+    "devCommand": "pnpm dev",
+    "scripts": {
+      "dev": "node scripts/dev.mjs",
+      "sync:styles": "node scripts/sync-styles.mjs",
+      "dev:build": "pnpm run sync:styles && node esbuild.config.mjs",
+      "build": "pnpm run sync:styles && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+      "lint": "eslint .",
+      "lint:fix": "eslint . --fix",
+      "test": "vitest run",
+      "ci": "pnpm run build && pnpm run lint && pnpm run test",
+      "prepare": "husky",
+      "version": "node scripts/version.mjs",
+      "postversion": "git push && git push --tags",
+      "release:patch": "node scripts/release.mjs patch",
+      "release:minor": "node scripts/release.mjs minor",
+      "release:major": "node scripts/release.mjs major"
+    }
+  },
+  "conventions": {
+    "namingStyle": "camelCase/PascalCase",
+    "importStyle": "ES modules",
+    "testPattern": "*.test.ts",
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "scripts",
+      "src",
+      "test"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "obsidian-note-player": {
+      "path": "obsidian-note-player",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1774426785839,
+      "keyFiles": [
+        "main.js",
+        "manifest.json",
+        "styles.css"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 5,
+      "lastAccessed": 1774426785842,
+      "keyFiles": [
+        "dev.mjs",
+        "release-notes.mjs",
+        "release.mjs",
+        "sync-styles.mjs",
+        "version.mjs"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1774426785851,
+      "keyFiles": [
+        "main.ts",
+        "styles.css"
+      ]
+    },
+    "test": {
+      "path": "test",
+      "purpose": "Test files",
+      "fileCount": 9,
+      "lastAccessed": 1774426785852,
+      "keyFiles": [
+        "audio-cache.test.ts",
+        "base-files.test.ts",
+        "dedupe.test.ts",
+        "library-index.test.ts",
+        "playback-state.test.ts"
+      ]
+    },
+    "src/types": {
+      "path": "src/types",
+      "purpose": "Type definitions",
+      "fileCount": 6,
+      "lastAccessed": 1774426785854,
+      "keyFiles": [
+        "audio.ts",
+        "music.ts",
+        "notes.ts"
+      ]
+    },
+    "src/utils": {
+      "path": "src/utils",
+      "purpose": "Utility functions",
+      "fileCount": 4,
+      "lastAccessed": 1774426785854,
+      "keyFiles": [
+        "dedupe.ts",
+        "frontmatter.ts",
+        "wikilink.ts"
+      ]
+    },
+    "test/mocks": {
+      "path": "test/mocks",
+      "purpose": "Mock data",
+      "fileCount": 1,
+      "lastAccessed": 1774426785855,
+      "keyFiles": [
+        "obsidian.ts"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "src/ui/views/NotePlayerView.ts",
+      "accessCount": 3,
+      "lastAccessed": 1774437973366,
+      "type": "file"
+    },
+    {
+      "path": "package.json",
+      "accessCount": 2,
+      "lastAccessed": 1774427713045,
+      "type": "file"
+    },
+    {
+      "path": ".husky/pre-commit",
+      "accessCount": 2,
+      "lastAccessed": 1774427750933,
+      "type": "file"
+    },
+    {
+      "path": ".husky/commit-msg",
+      "accessCount": 2,
+      "lastAccessed": 1774427760801,
+      "type": "file"
+    },
+    {
+      "path": "src/main.ts",
+      "accessCount": 2,
+      "lastAccessed": 1774429287105,
+      "type": "file"
+    },
+    {
+      "path": "src/ui/settings.ts",
+      "accessCount": 1,
+      "lastAccessed": 1774437924728,
+      "type": "file"
+    },
+    {
+      "path": "src/ui/download-status-bar.ts",
+      "accessCount": 1,
+      "lastAccessed": 1774437925258,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

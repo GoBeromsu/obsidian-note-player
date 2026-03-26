@@ -73,7 +73,7 @@ export class AudioCacheService implements AudioCachePort {
 				stderrOutput += line;
 				const match = line.match(/\[download\]\s+([\d.]+)%/);
 				if (match) {
-					onProgress(parseFloat(match[1]));
+					onProgress(parseFloat(match[1]!));
 				}
 			});
 
@@ -118,7 +118,7 @@ export class AudioCacheService implements AudioCachePort {
 
 	/** Obsidian's process.env.PATH often excludes Homebrew/user paths.
 	 *  Ensure the directory containing yt-dlp (and likely ffmpeg) is on PATH. */
-	private spawnEnv(): NodeJS.ProcessEnv {
+	private spawnEnv(): Record<string, string | undefined> {
 		const ytdlpDir = dirname(this.ytdlpPath);
 		const currentPath = process.env.PATH ?? '';
 		if (currentPath.split(':').includes(ytdlpDir)) return { ...process.env };
