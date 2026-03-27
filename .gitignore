@@ -25,3 +25,4 @@ test-*.png
 .DS_Store
 .claude/
 .omc/state/hud-stdin-cache.json
+obsidian-note-player/
