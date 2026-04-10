@@ -35,7 +35,7 @@ Note Player (`note-player`) — Obsidian plugin that plays note-backed playlists
 | `src/ui/views/` | NotePlayerView, PlayerSurface, PlaylistNameModal (see `src/ui/views/AGENTS.md`) |
 | `src/types/` | Pure type definitions (see `src/types/AGENTS.md`) |
 | `src/utils/` | Pure utility functions (see `src/utils/AGENTS.md`) |
-| `src/shared/` | Boiler-template synced files — DO NOT EDIT (see `src/shared/AGENTS.md`) |
+| `src/shared/` | Repo-local plugin support modules — edit here when Note Player behavior changes (see `src/shared/AGENTS.md`) |
 
 ## For AI Agents
 
@@ -43,7 +43,7 @@ Note Player (`note-player`) — Obsidian plugin that plays note-backed playlists
 - 4-layer architecture: `domain/` must not import `obsidian`
 - `audio-cache.ts` wraps yt-dlp/ffmpeg — keep all subprocess calls inside it
 - Testing is **remote-only** (Ataraxia vault) — do not test on local vault
-- `src/shared/` synced from `obsidian-boiler-template` — never edit directly
+- `src/shared/` is repo-local support code for this plugin — keep behavior scoped to Note Player
 - `isDesktopOnly: true` — Node.js child_process and fs APIs are safe
 
 ### Testing Requirements
@@ -60,7 +60,8 @@ pnpm run lint     # ESLint — 0 errors required
 ## Dependencies
 
 ### Internal
-- `obsidian-boiler-template` — source of truth for `src/shared/`
+- `src/shared/` — repo-local logger and notice support used by `main.ts` and `ui/`
+- `obsidian-boiler-template` — shared harness reference for lint/release tooling, not runtime source of truth for `src/shared/`
 
 ### External
 - `obsidian` — Obsidian Plugin API

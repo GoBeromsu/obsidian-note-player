@@ -36,4 +36,4 @@ UI and Obsidian API integration. Views, settings tabs, status bars, and modals. 
 - `domain/` — business logic and state management
 - `types/` — PlaylistViewHost, PlaylistViewState, NotePlayerSettings
 - `utils/` — helper functions
-- `shared/` — PluginNotices, PluginLogger
+- `shared/` — repo-local PluginNotices and PluginLogger support utilities

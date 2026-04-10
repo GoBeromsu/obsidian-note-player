@@ -21,7 +21,7 @@ Composition root and layered architecture. All source code follows a strict one-
 | `ui/` | Obsidian-dependent — views, settings, commands, adapters |
 | `types/` | Pure type definitions — NO obsidian imports, structural contracts |
 | `utils/` | Pure utility functions — zero state, no external dependencies |
-| `shared/` | Boiler-template synced — PluginLogger, PluginNotices, settings migration |
+| `shared/` | Repo-local support utilities — PluginLogger and PluginNotices for Note Player |
 
 ## Dependency Flow
 
@@ -45,4 +45,4 @@ shared/ ─┘               │
 - `obsidian` — imported in `ui/`, `main.ts`, `shared/` only
 - `yt-dlp` — spawned via child_process in `domain/audio-cache.ts`
 - `node:sqlite` — used in domain storage layer
-- Boiler-template shared modules — auto-synced from obsidian-boiler-template
+- `shared/` is maintained locally in this repo — avoid reintroducing sync-only assumptions for runtime support code
