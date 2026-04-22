@@ -9,7 +9,7 @@ export const NOTICE_CATALOG = {
 	active_note_not_music: { template: 'The active note is not a music note with a playable source.' },
 	active_note_not_playlist: { template: 'The active note is not a playlist note.' },
 	playlist_missing: { template: 'Choose a playlist first.' },
-	download_started: { template: 'Downloading {{title}}...' },
+	download_started: { template: 'Downloading {{title}}…' },
 	download_complete: { template: 'Downloaded {{title}}.' },
 	download_failed: { template: 'Download failed: {{reason}}' },
 	download_cancelled: { template: 'Download cancelled.' },
