@@ -1,4 +1,12 @@
-import { AbstractInputSuggest, App, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import {
+	AbstractInputSuggest,
+	App,
+	FuzzySuggestModal,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TFolder,
+} from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING } from '../domain/config';
 import type { AudioFormat } from '../types/audio';
 import type { NotePlayerSettings } from '../types/settings';
@@ -8,6 +16,29 @@ interface SettingsHost extends Plugin {
 	saveSettings(): Promise<void>;
 	refresh(showNotice?: boolean): Promise<void>;
 	refreshCompanionBases(): Promise<void>;
+}
+
+function resolveVaultFolderPath(folder: TFolder): string {
+	return folder.path === '/' ? '' : folder.path;
+}
+
+class VaultFolderSuggestModal extends FuzzySuggestModal<TFolder> {
+	constructor(app: App, private readonly onChoose: (folder: TFolder) => void) {
+		super(app);
+		this.setPlaceholder('Type to search vault folders…');
+	}
+
+	getItems(): TFolder[] {
+		return this.app.vault.getAllFolders(true);
+	}
+
+	getItemText(folder: TFolder): string {
+		return folder.path === '/' ? '/ (vault root)' : folder.path;
+	}
+
+	onChooseItem(folder: TFolder): void {
+		this.onChoose(folder);
+	}
 }
 
 function collectVaultProperties(app: App): string[] {
@@ -95,11 +126,14 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 		containerEl.empty();
 
 		const getProperties = () => collectVaultProperties(this.app);
+		let playlistFolderInput: HTMLInputElement | null = null;
 
 		new Setting(containerEl)
 			.setName('Playlist folder')
-			.setDesc('New playlist notes are created in this vault folder.')
+			.setDesc('Choose or type the vault folder where new playlist notes are created.')
 			.addText((text) => {
+				playlistFolderInput = text.inputEl;
+				text.inputEl.addClass('onp-setting-input-full');
 				text
 					.setPlaceholder('90. System/playlists')
 					.setValue(this.plugin.settings.playlistFolder)
@@ -108,7 +142,21 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						await this.plugin.refresh();
 					});
-				text.inputEl.addClass('onp-setting-input-full');
+			})
+			.addButton((button) => {
+				button
+					.setIcon('folder')
+					.setTooltip('Pick vault folder')
+					.onClick(() => {
+						new VaultFolderSuggestModal(this.app, (folder: TFolder) => {
+							const nextValue = resolveVaultFolderPath(folder);
+							this.plugin.settings.playlistFolder = nextValue;
+							void this.plugin.saveSettings();
+							void this.plugin.refresh();
+							if (playlistFolderInput) playlistFolderInput.value = nextValue;
+						}).open();
+					});
+				button.buttonEl.setAttribute('aria-label', 'Pick vault folder');
 			});
 
 		new Setting(containerEl).setHeading().setName('Music note mapping');
