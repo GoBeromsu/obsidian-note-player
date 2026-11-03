@@ -222,7 +222,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				const apply = (value: string) => {
 					this.setControlValue(key, value);
 					sync();
-					if (button) settle(button.buttonEl);
+					if (button) settle(this.host, button.buttonEl);
 				};
 				setting.setClass('onp-picker-setting');
 				setting.addExtraButton((extra) => {
@@ -242,7 +242,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	}
 }
 
-function settle(el: HTMLElement): void {
-	el.addEventListener('animationend', () => el.removeClass('is-changed'), { once: true });
+function settle(owner: SettingsHost, el: HTMLElement): void {
+	owner.registerDomEvent(el, 'animationend', () => el.removeClass('is-changed'), { once: true });
 	el.addClass('is-changed');
 }

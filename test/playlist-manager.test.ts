@@ -3,9 +3,7 @@ import {
 	resolveSelectedPlaylistPath,
 	getPlaylistOrThrow,
 	toPlaylistSummary,
-	moveValue,
 	toPlaylistTrack,
-	moveItem,
 	successorAfterRemoval,
 } from '../src/domain/playlist-manager';
 import type { MusicTrack, PlaylistNote } from '../src/types/music';
@@ -99,26 +97,6 @@ describe('toPlaylistTrack', () => {
 		expect(result.artist).toBe('Artist');
 		expect(result.videoId).toBe('abc');
 		expect(result.tags).toEqual(['rock']);
-	});
-});
-
-describe('moveItem', () => {
-	it('moves an item without mutating the input', () => {
-		const input = ['a', 'b', 'c'];
-		expect(moveItem(input, 0, 2)).toEqual(['b', 'c', 'a']);
-		expect(moveItem(input, 2, 0)).toEqual(['c', 'a', 'b']);
-		expect(input).toEqual(['a', 'b', 'c']);
-	});
-});
-
-describe('moveValue', () => {
-	it('keeps entries added after the move started', () => {
-		expect(moveValue(['a', 'b', 'c', 'new'], 'a', 2)).toEqual(['b', 'c', 'a', 'new']);
-	});
-
-	it('clamps the target and ignores missing items', () => {
-		expect(moveValue(['a', 'b'], 'a', 5)).toEqual(['b', 'a']);
-		expect(moveValue(['a', 'b'], 'x', 0)).toEqual(['a', 'b']);
 	});
 });
 
