@@ -11,6 +11,8 @@ import type { NotePlayerSettings } from './types/settings';
 import type { AudioCachePort, PlaylistTrack, PlaylistViewHost, PlaylistViewState } from './types/view';
 import { AudioCacheService } from './services/audio-cache';
 import { PeaksStore } from './services/peaks-store';
+import { ThumbnailCacheService } from './services/thumbnail-cache';
+import { THUMBNAIL_CACHE_FOLDER } from './domain/thumbnail-cache';
 import { openCompanionBase, writeCompanionBaseFiles } from './services/companion-bases';
 import { TrackImporter } from './services/track-importer';
 import { PlaylistService } from './services/playlist-service';
@@ -42,6 +44,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   private errorMessage: string | null = null;
   private audioCacheService: AudioCacheService | null = null;
   private peaksStore: PeaksStore | null = null;
+  private thumbnailCache: ThumbnailCacheService | null = null;
   private vaultBasePath = '';
   private playerSurface: PlayerSurface | null = null;
   private playerHostEl: HTMLDivElement | null = null;
@@ -83,6 +86,9 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       migratedFolders = true;
     }
     if (migratedFolders) await this.saveData(this.settings);
+    const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+    this.thumbnailCache = new ThumbnailCacheService(this.app.vault.adapter, `${pluginDir}/${THUMBNAIL_CACHE_FOLDER}`);
+    this.register(this.thumbnailCache.subscribe(() => this.notifyChange()));
     await this.refreshIndex();
 
     this.vaultBasePath = (this.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? '';
@@ -159,6 +165,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     this.playerSurface?.destroy();
     this.playerSurface = null;
     this.audioCacheService?.dispose();
+    this.thumbnailCache?.dispose();
     this.playerHostEl = null;
     this.scheduleRefresh.cancel();
   }
@@ -412,6 +419,10 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const cacheDir = `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/audio-cache`;
     this.peaksStore ??= new PeaksStore(this.app.vault.adapter, cacheDir, (id) => `${cacheDir}/${id}.${this.settings.audioFormat}`);
     return this.peaksStore;
+  }
+
+  getThumbnailCache(): ThumbnailCacheService | null {
+    return this.thumbnailCache;
   }
 
   getAudioCacheService(): AudioCachePort | null {

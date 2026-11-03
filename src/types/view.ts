@@ -84,6 +84,14 @@ export interface PlaylistViewHost {
 	toggleRepeatMode?(): Promise<void>;
 	getAudioCacheService?(): AudioCachePort | null;
 	getPeaksStore?(): PeaksStore | null;
+	getThumbnailCache?(): ThumbnailCachePort | null;
+}
+
+/** `resolve` never blocks: a cache miss returns the remote URL and queues a download, then subscribers fire. */
+export interface ThumbnailCachePort {
+	resolve(videoId: string): string;
+	subscribe(onChange: () => void): () => void;
+	clear(): Promise<void>;
 }
 
 export interface VaultAdapter {
