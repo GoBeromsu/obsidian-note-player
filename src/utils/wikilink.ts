@@ -1,9 +1,10 @@
 import type { PlaylistTrackReference } from '../types/notes';
 
-export function linkDisplayText(input: string): string {
+export function linkDisplayText(input: string, barePath = false): string {
   const trimmed = input.trim();
-  if (!trimmed.startsWith('[[') || !trimmed.endsWith(']]')) return trimmed;
-  const [target = '', alias] = trimmed.slice(2, -2).split('|');
+  const wikilink = trimmed.startsWith('[[') && trimmed.endsWith(']]');
+  if (!wikilink && !barePath) return trimmed;
+  const [target = '', alias] = (wikilink ? trimmed.slice(2, -2) : trimmed).split('|');
   if (alias?.trim()) return alias.trim();
   const path = target.split('#')[0]?.trim() ?? '';
   return stripMarkdownExtension(path.split('/').pop() ?? path);

@@ -58,7 +58,7 @@ export class MigrationPreviewModal extends Modal {
 			if (playlist.missing.length) {
 				const missing = row.descEl.createDiv({ cls: 'onp-migration-detail onp-migration-missing' });
 				this.icon(missing, 'triangle-alert');
-				const references = missing.createSpan({ text: `${playlist.missing.length} missing: ${playlist.missing.map(linkDisplayText).join(', ')}` });
+				const references = missing.createSpan({ text: `${playlist.missing.length} missing: ${playlist.missing.map((reference) => linkDisplayText(reference, true)).join(', ')}` });
 				references.setAttr('title', playlist.missing.join(', '));
 				references.setAttr('aria-label', playlist.missing.join(', '));
 			}

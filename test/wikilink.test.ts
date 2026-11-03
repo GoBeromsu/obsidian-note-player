@@ -16,6 +16,18 @@ describe('wikilink helpers', () => {
   ])('displays %s as %s', (input, expected) => {
     expect(linkDisplayText(input)).toBe(expected);
   });
+  it.each([
+    ['Missing', 'Missing'],
+    ['Missing.md', 'Missing'],
+    ['tracks/Missing', 'Missing'],
+    ['qa-8/tracks/Missing', 'Missing'],
+    ['a/b/X.md', 'X'],
+    ['70. Collections/04 Music/Missing.md', 'Missing'],
+    ['a/b/X.MD', 'X'],
+    ['[[a/b/X.md|Alias]]', 'Alias'],
+  ])('displays reference %s as %s', (input, expected) => {
+    expect(linkDisplayText(input, true)).toBe(expected);
+  });
   it('formats canonical note paths as Obsidian wikilinks', () => {
     expect(toObsidianWikilink('Music/Track.md')).toBe('[[Music/Track]]');
     expect(toObsidianWikilink('Music/Track')).toBe('[[Music/Track]]');

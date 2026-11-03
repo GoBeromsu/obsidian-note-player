@@ -29,6 +29,7 @@ describe('buildMusicLibrary', () => {
     { author: '[[Omoide Story - Topic]]', expected: 'Omoide Story - Topic' },
     { author: '[[path/X.md|Alias]]', expected: 'Alias' },
     { author: '[[path/X.md]]', expected: 'X' },
+    { author: 'AC/DC', expected: 'AC/DC' },
     { author: ['[[path/X|Alias]]', 'Band', '[[Music/Y.md]]'], expected: 'Alias, Band, Y' },
     { author: [null, '  ', 7], expected: '' },
   ])('displays author names instead of raw wikilinks: $author', ({ author, expected }) => {

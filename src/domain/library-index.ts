@@ -59,7 +59,7 @@ function toMusicTrack(
   if (!sourceUrl) return null;
   const videoId = extractYoutubeVideoId(sourceUrl);
   if (!videoId) return null;
-  const artist = asStringArray(note.frontmatter?.[propertyMapping.musicArtistProperty]).map(linkDisplayText).join(', ');
+  const artist = asStringArray(note.frontmatter?.[propertyMapping.musicArtistProperty]).map((value) => linkDisplayText(value)).join(', ');
   return {
     path: note.path,
     // A note saved under its bare id may carry the real title in metadata when renaming it would break links.
