@@ -5,7 +5,7 @@ import { NOTICE_CATALOG, renderNotice } from '../domain/notices';
 import type { PlaylistMigration } from '../domain/playlist-migration';
 import type { NotePlayerSettings } from '../types/settings';
 import { hasType } from '../utils/frontmatter';
-import { parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
+import { linkDisplayText, parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
 import { showNotice } from '../ui/notices';
 import { MigrationPreviewModal } from '../ui/views/MigrationPreviewModal';
 import { collectMigrationPlan, MIGRATION_BASE_MARKER, type MigrationFailure, type MigrationScan } from './playlist-migration-plan';
@@ -108,7 +108,7 @@ async function applyMigration(
 		for (const [index, playlist] of playlists.entries()) {
 			signal.throwIfAborted();
 			reportProgress(index + 1, playlists.length, playlist.notePath, 'converting');
-			progress.setMessage(renderNotice(NOTICE_CATALOG.migration_progress.template, { name: playlist.notePath }));
+			progress.setMessage(renderNotice(NOTICE_CATALOG.migration_progress.template, { name: linkDisplayText(playlist.notePath, true) }));
 			try {
 				const current = await collectMigrationPlan(app, settings, playlist.notePath);
 				signal.throwIfAborted();

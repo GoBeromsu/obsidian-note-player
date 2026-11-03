@@ -7,8 +7,10 @@ import type { MarkdownNoteSnapshot } from '../src/types/notes';
 
 vi.mock('obsidian', () => ({
   App: class {},
+  Notice: class {},
   Plugin: class {
     constructor(readonly app: App) {}
+    saveData() { return Promise.resolve(); }
   },
   debounce: (callback: () => void) => callback,
 }));
@@ -56,6 +58,41 @@ function snapshots(members: string[]): MarkdownNoteSnapshot[] {
 }
 
 describe('library refresh ordering', () => {
+  it.each([
+    ['Other.md', 'Other song.md'],
+    ['Mix.md', 'Song.md'],
+    ['Empty.md', 'Song.md'],
+  ])('plays within selected playlist %s rather than the remembered queue', async (selected, expected) => {
+    const plugin = new NotePlayerPlugin(new App(), {
+      id: 'note-player', name: 'Note Player', version: '0.8.9',
+      minAppVersion: '1.13.0', description: '', author: '',
+    });
+    plugin.settings = { ...DEFAULT_SETTINGS, lastPlaylistPath: 'Mix.md' };
+    const [mix, song] = snapshots([]);
+    if (!mix || !song) throw new Error('Missing playlist fixture');
+    vi.mocked(collectNoteSnapshots).mockReturnValue([
+      ...snapshots(['Mix.md']),
+      { ...mix, path: 'Other.md', basename: 'Other', embeddedBases: ['Other.base'] },
+      { ...mix, path: 'Empty.md', basename: 'Empty', embeddedBases: ['Empty.base'] },
+      { ...song, path: 'Earlier song.md', basename: 'Earlier song', frontmatterLinks: { playlists: ['Mix.md'] } },
+      { ...song, path: 'Other song.md', basename: 'Other song', frontmatterLinks: { playlists: ['Other.md'] } },
+    ]);
+    vi.mocked(collectBaseConfigs).mockResolvedValue(new Map());
+    await plugin.refresh();
+    await plugin.playTrack('Song.md');
+    await plugin.selectPlaylist(selected);
+    const play = vi.spyOn(plugin, 'playTrack');
+
+    await plugin.togglePlayback();
+
+    expect(plugin.getState().currentTrack?.path).toBe(expected);
+    if (selected === 'Empty.md') {
+      expect(play).not.toHaveBeenCalled();
+    } else {
+      expect(plugin.getState().queue.map((track) => track.path)).toContain(plugin.getState().currentTrack?.path);
+    }
+  });
+
   it.each([
     {
       result: 'empty membership',

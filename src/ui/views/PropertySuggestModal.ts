@@ -57,7 +57,7 @@ abstract class KeySuggestModal extends FuzzySuggestModal<string> {
 			return [{ item: this.current, match: plain }, ...matches.filter((match) => match.item !== this.current)];
 		}
 		const created = createItemFor(query, this.getItems());
-		return created === null ? matches : [{ item: created, match: plain }, ...matches];
+		return created === null ? matches : [...matches, { item: created, match: plain }];
 	}
 
 	renderSuggestion(match: FuzzyMatch<string>, el: HTMLElement): void {

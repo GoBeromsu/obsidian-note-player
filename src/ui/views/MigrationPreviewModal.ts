@@ -1,6 +1,7 @@
 import { Modal, Setting, setIcon, type App, type ButtonComponent } from 'obsidian';
 import type { PlaylistMigrationPlan } from '../../domain/playlist-migration';
 import { linkDisplayText } from '../../utils/wikilink';
+import { plural } from '../../utils/plural';
 
 export class MigrationPreviewModal extends Modal {
 	private confirmed = false;
@@ -21,16 +22,17 @@ export class MigrationPreviewModal extends Modal {
 			playlist.createBase || playlist.appendEmbed || playlist.renameLegacyKey || playlist.membershipAdds.length > 0);
 		const missingCount = playlists.reduce((count, playlist) => count + playlist.missing.length, 0);
 		const summary = this.contentEl.createDiv({ cls: 'onp-migration-summary' });
-		const counts: [number, string][] = [
-			[totals.playlists, totals.playlists === 1 ? 'playlist will convert' : 'playlists will convert'],
-			[totals.membershipAdds, totals.membershipAdds === 1 ? 'track will be linked' : 'tracks will be linked'],
-			[missingCount, missingCount === 1 ? 'missing reference' : 'missing references'],
-			[this.plan.conflicts.length + this.plan.invalid.length, 'skipped'],
+		const counts = [
+			`${plural(totals.playlists, 'playlist')} will convert`,
+			`${plural(totals.membershipAdds, 'track')} will be linked`,
+			plural(missingCount, 'missing reference'),
+			plural(this.plan.conflicts.length + this.plan.invalid.length, 'skipped', 'skipped'),
 		];
-		for (const [count, label] of counts) {
+		for (const count of counts) {
 			const item = summary.createSpan();
-			item.createEl('strong', { text: String(count) });
-			item.appendText(` ${label}`);
+			const separator = count.indexOf(' ');
+			item.createEl('strong', { text: count.slice(0, separator) });
+			item.appendText(count.slice(separator));
 		}
 		this.contentEl.createEl('p', {
 			text: 'Original track lists stay in tracks_legacy. Nothing is deleted.',
@@ -81,7 +83,7 @@ export class MigrationPreviewModal extends Modal {
 			})
 			.addButton((button) => {
 				this.convertButton = button;
-				button.setButtonText(`Convert ${totals.playlists} ${totals.playlists === 1 ? 'playlist' : 'playlists'}`).setCta()
+				button.setButtonText(`Convert ${plural(totals.playlists, 'playlist')}`).setCta()
 				.setDisabled(totals.playlists === 0).onClick(() => {
 					if (this.confirmed) return;
 					this.confirmed = true;
