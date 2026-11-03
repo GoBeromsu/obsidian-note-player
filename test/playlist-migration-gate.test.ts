@@ -101,6 +101,88 @@ describe('migration gate regressions', () => {
 		broken.mockRestore();
 	});
 
+	it.each(['```md\n![[Playlists/Mix.base]]\n```', '`![[Playlists/Mix.base]]`'])(
+		'restores a removed real embed despite stale pairing metadata and code example: %s', async (example) => {
+			const host = await fixture();
+			const fake = state(host.app);
+			const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+			if (!note) throw new Error('Missing note');
+			await host.app.vault.create('Playlists/Mix.base', 'views: []\n');
+			const original = await host.app.vault.read(note);
+			await host.app.vault.process(note, () => `${original}\n![[Playlists/Mix.base]]\n`);
+			fake.contents.set(note.path, `${original}\n${example}\n`);
+
+			await run(host);
+
+			expect(fake.contents.get(note.path)?.split('\n').slice(3).join('\n')).toBe(
+				`Original body\n\n${example}\n\n![[Playlists/Mix.base]]\n`,
+			);
+			expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 0 }));
+		},
+	);
+
+	it('keeps exactly one embed across archive interruptions with delayed body indexing', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		fake.pauseIndexing = true;
+		const write = host.app.fileManager.processFrontMatter.bind(host.app.fileManager);
+		let interruptions = 2;
+		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementation(async (file, edit) => {
+			if (file.path === 'Playlists/Mix.md' && interruptions > 0) {
+				interruptions--;
+				throw new Error('Archive write denied');
+			}
+			await write(file, edit);
+		});
+
+		try {
+			await run(host);
+			await run(host);
+			await run(host, () => { fake.pauseIndexing = false; });
+		} finally {
+			fake.pauseIndexing = false;
+			fake.flush();
+		}
+
+		expect(fake.contents.get('Playlists/Mix.md')?.match(/!\[\[Playlists\/Mix\.base\]\]/g)).toEqual(['![[Playlists/Mix.base]]']);
+		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual(['Playlists/Mix.base']);
+		expect(fake.contents.get('Playlists/Mix.md')).toContain('"tracks_legacy":');
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 0, missing: 0 }));
+	});
+
+	it('checks embed presence inside the atomic process callback', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const process = host.app.vault.process.bind(host.app.vault);
+		vi.spyOn(host.app.vault, 'process').mockImplementationOnce((file, edit) => {
+			fake.contents.set(file.path, `${fake.contents.get(file.path)}\n![[Playlists/Mix.base]]\n`);
+			return process(file, edit);
+		});
+
+		await run(host);
+
+		expect(fake.contents.get('Playlists/Mix.md')?.match(/!\[\[Playlists\/Mix\.base\]\]/g)).toEqual(['![[Playlists/Mix.base]]']);
+	});
+
+	it('does not report success if the embed is removed during the archive write', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const write = host.app.fileManager.processFrontMatter.bind(host.app.fileManager);
+		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementation(async (file, edit) => {
+			await write(file, edit);
+			if (file.path === 'Playlists/Mix.md') {
+				await host.app.vault.process(file, (content) => content.replace('\n![[Playlists/Mix.base]]\n', ''));
+			}
+		});
+		const failed = vi.spyOn(noticeService, 'showNotice');
+
+		await run(host);
+
+		expect(fake.contents.get('Playlists/Mix.md')).not.toContain('![[Playlists/Mix.base]]');
+		expect(notices.at(-1)).toContain(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 0, tracks: 1, missing: 0 }));
+		expect(failed).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: 'Playlists/Mix.md' }));
+	});
+
 	it('converts another playlist and reports the result when previewed YAML becomes malformed', async () => {
 		const host = await fixture();
 		const fake = state(host.app);

@@ -5,7 +5,7 @@ import { NOTICE_CATALOG, renderNotice } from '../domain/notices';
 import type { PlaylistMigration } from '../domain/playlist-migration';
 import type { NotePlayerSettings } from '../types/settings';
 import { hasType } from '../utils/frontmatter';
-import { parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
+import { embeddedWikilinks, parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
 import { showNotice } from '../ui/notices';
 import { MigrationPreviewModal } from '../ui/views/MigrationPreviewModal';
 import { collectMigrationPlan, MIGRATION_BASE_MARKER, type MigrationFailure, type MigrationScan } from './playlist-migration-plan';
@@ -87,6 +87,8 @@ async function applyMigration(
 				}
 				const note = app.vault.getFileByPath(playlist.notePath);
 				if (!note) throw new Error('Playlist note no longer exists.');
+				const hasEmbed = (content: string) => embeddedWikilinks(content.slice(getFrontMatterInfo(content).contentStart))
+					.some((link) => app.metadataCache.getFirstLinkpathDest(link, note.path)?.path === playlist.basePath);
 				if (playlist.createBase) {
 					await app.vault.create(playlist.basePath,
 						`${MIGRATION_BASE_MARKER}${JSON.stringify(note.path)}\n${createPlaylistBaseContent(settings)}`);
@@ -116,21 +118,20 @@ async function applyMigration(
 					}
 					if (added) linked++;
 				}
-				if (editsNote) {
-					await withMetadataSettled(app, note, async () => {
-						if (playlist.appendEmbed) {
-							await app.vault.process(note, (content) => `${content}\n![[${playlist.basePath}]]\n`);
-						}
-						if (playlist.renameLegacyKey) {
-							const key = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
-							await app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
-								if (Object.hasOwn(fm, 'tracks_legacy')) throw new Error('tracks_legacy already exists; skipped.');
-								if (!Array.isArray(fm[key])) throw new Error('Legacy track list changed; run the converter again.');
-								fm.tracks_legacy = fm[key];
-								delete fm[key];
-							});
-						}
-					});
+				await withMetadataSettled(app, note, async () => {
+					await app.vault.process(note, (content) => hasEmbed(content) ? content : `${content}\n![[${playlist.basePath}]]\n`);
+					if (playlist.renameLegacyKey) {
+						const key = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
+						await app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
+							if (Object.hasOwn(fm, 'tracks_legacy')) throw new Error('tracks_legacy already exists; skipped.');
+							if (!Array.isArray(fm[key])) throw new Error('Legacy track list changed; run the converter again.');
+							fm.tracks_legacy = fm[key];
+							delete fm[key];
+						});
+					}
+				});
+				if (!hasEmbed(await app.vault.read(note))) {
+					throw new Error('Companion base embed was not preserved. Run the converter again.');
 				}
 				converted++;
 				missing += playlist.missing.length;
