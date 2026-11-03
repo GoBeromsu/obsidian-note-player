@@ -18,6 +18,7 @@ vi.mock('../src/services/vault-io', () => ({
 }));
 vi.mock('../src/ui/settings', () => ({ NotePlayerSettingsTab: class {} }));
 vi.mock('../src/ui/commands', () => ({ registerCommands: vi.fn() }));
+vi.mock('../src/services/playlist-migration-service', () => ({ convertPlaylistNotes: vi.fn(() => Promise.resolve()) }));
 vi.mock('../src/ui/player-setup', () => ({ createPlayer: vi.fn() }));
 vi.mock('../src/ui/views/NotePlayerView', () => ({
   NotePlayerView: class {},

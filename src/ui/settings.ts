@@ -11,6 +11,7 @@ import {
 } from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/config';
 import { buildFolderOptions } from '../domain/settings-options';
+import { convertPlaylistNotes } from '../services/playlist-migration-service';
 import type { AudioFormat } from '../types/audio';
 import type { NotePlayerSettings, TurntableStyle } from '../types/settings';
 import type { ThumbnailCachePort } from '../types/view';
@@ -163,6 +164,17 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 							setting.addButton((button) =>
 								button.setButtonText('Refresh').onClick(() => {
 									void this.host.refreshCompanionBases();
+								}),
+							);
+						},
+					},
+					{
+						name: 'Legacy playlist notes',
+						desc: 'Preview conversion to Bases. Original track lists are preserved.',
+						render: (setting) => {
+							setting.addButton((button) =>
+								button.setButtonText('Convert playlist notes').onClick(() => {
+									void convertPlaylistNotes(this.host);
 								}),
 							);
 						},
