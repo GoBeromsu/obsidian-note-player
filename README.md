@@ -64,6 +64,11 @@ The now-playing card shows a spinning record with a tonearm. Starting playback l
 
 Playlist folder, music folder, property mapping for URL, thumbnail, and artist, playlist schema (track list, description, cover, note types), audio format (MP3 or WAV), autoplay, open on startup, and **Turntable sounds**.
 
+- **Music folder** is a library discovery scope and where imported track notes are created.
+- **Playlist folder** is a playlist discovery scope and where new playlists are created.
+
+Both folder settings include all subfolders. Choosing **Vault root** in either setting includes the whole vault, including all subfolders.
+
 ## Disclosures
 
 Note Player is desktop only. It has no telemetry and no accounts, and it sends nothing to any server except YouTube.
@@ -88,8 +93,8 @@ Note Player is desktop only. It has no telemetry and no accounts, and it sends n
 
 ### Reading your vault
 
-- To build the music library, the plugin reads the frontmatter of Markdown notes in your **Music folder** and its subfolders, in your **Playlist folder**, and in the track notes your playlists link to, through Obsidian's metadata cache. With no Music folder set, only notes at the vault root are read, never its subfolders. It does this on startup, when notes change, and when you run **Refresh music library**. Note contents aren't read, and nothing leaves your device.
-- The property fields in settings suggest frontmatter keys found in that same folder.
+- To build the music library, the plugin reads the frontmatter of Markdown notes in your **Music folder** and **Playlist folder**, including all subfolders, and in the track notes your playlists link to, through Obsidian's metadata cache. Choosing **Vault root** in either folder setting includes the whole vault, including all subfolders. It does this on startup, when notes change, and when you run **Refresh music library**. Note contents aren't read, and nothing leaves your device.
+- The property fields in settings suggest frontmatter keys found across your vault.
 
 ### Clipboard
 
