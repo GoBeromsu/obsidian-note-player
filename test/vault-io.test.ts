@@ -21,6 +21,7 @@ vi.mock('obsidian', () => {
   return {
     TFile, TFolder,
     normalizePath: (path: string) => path.replace(/^\/|\/$/g, ''),
+    parseLinktext: (text: string) => ({ path: text.split('#')[0] ?? '', subpath: text.includes('#') ? text.slice(text.indexOf('#')) : '' }),
     parseYaml: (content: string) => JSON.parse(content),
     App: class {
       vault = {
@@ -61,13 +62,13 @@ const position = { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 0
 beforeEach(() => { storage.files.clear(); storage.caches.clear(); storage.contents.clear(); storage.links.clear(); });
 
 describe('vault library snapshots', () => {
-  it('keeps root shallow and includes backlink members from outside the configured folders', () => {
+  it.each(['', '#ViewName', '#^row', '#ViewName|Alias'])('keeps root shallow and includes backlink members through base subpath %s', (subpath) => {
     const root = folder('/');
     const nested = folder('Elsewhere');
     const base = note('Mix.base');
     const companion = note('Mix.md', {
       frontmatter: { type: 'music-playlist' },
-      embeds: [{ link: base.path, original: '![[Mix.base]]', position }],
+      embeds: [{ link: base.path + subpath, original: `![[Mix.base${subpath}]]`, position }],
     });
     const outside = note('Elsewhere/Song.md', {
       frontmatter: { type: 'music', source: 'https://youtu.be/dQw4w9WgXcQ' },
@@ -88,12 +89,12 @@ describe('vault library snapshots', () => {
     expect(library.playlists[0]?.trackPaths).toEqual([outside.path]);
   });
 
-  it('reads only playlist-embedded bases and applies their player sort', async () => {
+  it.each(['', '#ViewName', '#^row', '#ViewName|Alias'])('reads only playlist-embedded bases with subpath %s and applies their player sort', async (subpath) => {
     const root = folder('/');
     const base = note('Custom.base');
     const playlist = note('Mix.md', {
       frontmatter: { type: 'music-playlist' },
-      embeds: [{ link: base.path, original: '![[Custom.base]]', position }],
+      embeds: [{ link: base.path + subpath, original: `![[Custom.base${subpath}]]`, position }],
     });
     const tracks = ['A', 'Z'].map((name) => note(`${name}.md`, {
       frontmatter: { type: 'music', source: 'https://youtu.be/dQw4w9WgXcQ' },

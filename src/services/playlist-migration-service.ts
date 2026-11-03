@@ -1,4 +1,4 @@
-import { Component, getFrontMatterInfo, Notice, parseLinktext, parseYaml, type App } from 'obsidian';
+import { Component, getFrontMatterInfo, Notice, parseYaml, type App } from 'obsidian';
 import { createPlaylistBaseContent } from '../domain/base-files';
 import { LEGACY_TRACKS_KEY } from '../domain/config';
 import { NOTICE_CATALOG, renderNotice } from '../domain/notices';
@@ -11,6 +11,7 @@ import { MigrationPreviewModal } from '../ui/views/MigrationPreviewModal';
 import { collectMigrationPlan, MIGRATION_BASE_MARKER, type MigrationFailure, type MigrationScan } from './playlist-migration-plan';
 import { withMetadataSettled } from './vault-io';
 import { alreadyConverted, convertMigrationContent, migrationEmbeds, migrationFrontmatter } from './migration-content';
+import { resolveEmbeddedFile } from './embed-resolution';
 
 interface MigrationHost extends Pick<Component, 'addChild' | 'removeChild'> {
 	readonly app: App;
@@ -135,8 +136,7 @@ async function applyMigration(
 						`${MIGRATION_BASE_MARKER}${JSON.stringify(note.path)}\n${createPlaylistBaseContent(settings)}`);
 				}
 				if (indexed && (indexed.embeds ?? []).filter((embed) =>
-					app.metadataCache.getFirstLinkpathDest(parseLinktext(embed.link.split('|')[0] ?? '').path, note.path)?.path
-					=== playlist.basePath).length !== 1) {
+					resolveEmbeddedFile(app, embed.link, note.path)?.path === playlist.basePath).length !== 1) {
 					throw new Error('Companion base embed was not preserved. Run the converter again.');
 				}
 				for (const [trackIndex, path] of playlist.membershipAdds.entries()) {

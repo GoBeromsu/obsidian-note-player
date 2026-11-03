@@ -25,9 +25,9 @@ beforeEach(async () => {
 describe('migration content decisions', () => {
 	it.each([
 		'![[Bases/Mix.base]]',
-		'![[Bases/Mix]]',
+		'![[Bases/Mix.base#ViewName]]',
 		'Some text ![[Bases/Mix.base|Mix]] after',
-		'> ![[Bases/Mix|Mix]]',
+		'> ![[Bases/Mix.base|Mix]]',
 		'`example\n\n![[Bases/Mix.base]]\n\n`end',
 	])('preserves a user embed without adding another: %s', (body) => {
 		const converted = convertMigrationContent(header + body, edit);
@@ -56,7 +56,7 @@ describe('migration content decisions', () => {
 		'<!-- ![[Bases/Mix.base]] -->',
 		'\\![[Bases/Mix.base]]',
 		'    ![[Bases/Mix.base]]',
-		'![[Bases/Mix.base]]\n![[Bases/Mix]]',
+		'![[Bases/Mix.base]]\n![[Bases/Mix.base|Again]]',
 		'%% note-player:playlist-base %%\nMissing',
 	])('fails closed for ambiguous content: %s', (body) => {
 		expect(() => convertMigrationContent(header + body, edit)).toThrow('Needs review');
@@ -64,7 +64,7 @@ describe('migration content decisions', () => {
 
 	it('pairs an exact owned block even before the base exists', () => {
 		expect(inspectMigrationEmbeds(migrationEmbedBlock(base), () => null)).toEqual({
-			ownedBases: [base], embeddedBases: [base], needsReview: false,
+			ownedBases: [base], embeddedBases: [base], needsReview: false, unresolvedEmbeds: [],
 		});
 	});
 

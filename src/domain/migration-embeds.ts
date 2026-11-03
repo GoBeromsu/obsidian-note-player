@@ -17,6 +17,7 @@ export function inspectMigrationEmbeds(content: string, resolve: MigrationLinkRe
 	});
 	const ownedBases: string[] = [];
 	const embeddedBases: string[] = [];
+	const unresolvedEmbeds: string[] = [];
 	let needsReview = false;
 	let fence: { readonly character: string; readonly length: number; readonly quotes: number } | undefined;
 	let comment = false;
@@ -57,7 +58,10 @@ export function inspectMigrationEmbeds(content: string, resolve: MigrationLinkRe
 			const path = resolved?.extension === 'base' ? resolved.path
 				: !resolved && ownedPaths.includes(target) ? target : undefined;
 			if (!path) {
-				if (!resolved) needsReview = true;
+				if (!resolved) {
+					needsReview = true;
+					unresolvedEmbeds.push(match[0]);
+				}
 				continue;
 			}
 			// Inline code, escaped syntax, comments and indented blocks need human interpretation.
@@ -74,5 +78,5 @@ export function inspectMigrationEmbeds(content: string, resolve: MigrationLinkRe
 	}
 	if (fence || comment || embeddedBases.length > 1 || ownedBases.length > 1) needsReview = true;
 	if (ownedBases.some((path) => embeddedBases.length && !embeddedBases.includes(path))) needsReview = true;
-	return { ownedBases, embeddedBases, needsReview };
+	return { ownedBases, embeddedBases, needsReview, unresolvedEmbeds };
 }

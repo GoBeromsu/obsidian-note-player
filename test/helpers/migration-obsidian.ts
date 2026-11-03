@@ -5,6 +5,7 @@ type Cache = {
 	frontmatterPosition?: Pos;
 	sections?: { type: string; position: Pos }[];
 	embeds: { link: string; original: string; position: Pos }[];
+	frontmatterLinks?: { key: string; link: string; original: string }[];
 };
 type Changed = (file: TFile, data: string, cache: Cache) => void;
 const eventCleanup = new WeakMap<object, () => void>();
@@ -61,6 +62,11 @@ export class TFile {
 	}
 }
 
+export class TFolder {
+	constructor(readonly path: string, readonly children: readonly TFile[]) {}
+	isRoot(): boolean { return this.path === '/'; }
+}
+
 function cacheFor(content: string): Cache {
 	const embeds: Cache['embeds'] = [];
 	let fenced = false;
@@ -88,7 +94,13 @@ function cacheFor(content: string): Cache {
 	if (content.trimEnd().length > end + 1) {
 		sections.push({ type: 'paragraph', position: position(content, end + 1, content.trimEnd().length) });
 	}
-	return { frontmatter: frontmatter(content), embeds, frontmatterPosition, sections };
+	const fm = frontmatter(content);
+	const frontmatterLinks = Object.entries(fm).flatMap(([key, raw]) =>
+		(Array.isArray(raw) ? raw : [raw]).flatMap((value, index) => typeof value === 'string'
+			? [...value.matchAll(/\[\[([^\]]+)\]\]/g)].map((match) => ({
+				key: `${key}.${index}`, link: match[1]?.split('|')[0] ?? '', original: match[0],
+			})) : []));
+	return { frontmatter: fm, embeds, frontmatterPosition, sections, frontmatterLinks };
 }
 
 export const notices: string[] = [];
@@ -119,7 +131,15 @@ export class App {
 	pauseIndexing = false;
 	onWrite: (file: TFile) => void = () => {};
 	onSubscribe: (name: string) => void = () => {};
-	constructor() { apps.set(this, this); }
+	constructor() {
+		apps.set(this, this);
+		Object.defineProperty(this.metadataCache, 'resolvedLinks', { get: () => Object.fromEntries(
+			[...this.cache].map(([path, cache]) => [path, Object.fromEntries((cache.frontmatterLinks ?? []).flatMap((link) => {
+				const target = this.metadataCache.getFirstLinkpathDest(link.link);
+				return target ? [[target.path, 1]] : [];
+			}))]),
+		) });
+	}
 
 	index(file: TFile, data: string): void {
 		if (file.extension !== 'md') return;
@@ -175,6 +195,7 @@ export class App {
 		offref: (ref: { callback: (file: TFile) => void }) => { this.modifyHandlers.delete(ref.callback); },
 		getMarkdownFiles: () => [...this.files.values()].filter((file) => file.extension === 'md'),
 		getAllLoadedFiles: () => [...this.files.values()],
+		getFolderByPath: (path: string) => new TFolder(path, [...this.files.values()].filter((file) => file.parent.path === path)),
 		getFileByPath: (path: string) => this.files.get(path) ?? null,
 		getAbstractFileByPath: (path: string) => this.files.get(path) ?? null,
 		read: (file: TFile) => Promise.resolve(this.contents.get(file.path) ?? ''),
@@ -197,7 +218,7 @@ export class App {
 		getFileCache: (file: TFile) => this.cache.get(file.path) ?? null,
 		getFirstLinkpathDest: (link: string) => {
 			const path = link.replace(/\.md$/, '');
-			return this.files.get(link) ?? this.files.get(`${path}.md`) ?? this.files.get(`${path}.base`) ?? null;
+			return this.files.get(link) ?? this.files.get(`${path}.md`) ?? null;
 		},
 		on: (...[name, callback]: ['changed', Changed] | ['resolved', () => void]) => {
 			if (name === 'changed') this.handlers.add(callback);
@@ -239,3 +260,4 @@ export const stringifyYaml = (value: unknown): string => JSON.stringify(value) +
 export const parseLinktext = (value: string) => ({
 	path: value.split('#')[0] ?? '', subpath: value.includes('#') ? value.slice(value.indexOf('#')) : '',
 });
+export const normalizePath = (path: string): string => path.replace(/^\/|\/$/g, '');

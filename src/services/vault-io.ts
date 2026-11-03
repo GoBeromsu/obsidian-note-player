@@ -6,6 +6,7 @@ import { uniqueName } from '../utils/dedupe';
 import { hasType } from '../utils/frontmatter';
 import type { MarkdownNoteSnapshot } from '../types/notes';
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
+import { resolveEmbeddedFile } from './embed-resolution';
 
 export async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	let current = '';
@@ -146,7 +147,7 @@ export function collectMusicFiles(app: App, folders: string[], playlistNoteType?
 	const companions = new Set(scoped.filter((file) => {
 		const cache = app.metadataCache.getFileCache(file);
 		return hasType(cache?.frontmatter, playlistNoteType) && cache?.embeds?.some((embed) =>
-			app.metadataCache.getFirstLinkpathDest(embed.link, file.path)?.extension === 'base');
+			resolveEmbeddedFile(app, embed.link, file.path)?.extension === 'base');
 	}).map((file) => file.path));
 	const files = new Set(scoped);
 	for (const [source, targets] of Object.entries(app.metadataCache.resolvedLinks)) {
@@ -167,7 +168,7 @@ export function collectNoteSnapshots(app: App, folders: string[], mapping: Youtu
 			if (target && key) (frontmatterLinks[key] ??= []).push(target.path);
 		}
 		const embeddedBases = (cache?.embeds ?? [])
-			.map((embed) => app.metadataCache.getFirstLinkpathDest(embed.link, file.path))
+			.map((embed) => resolveEmbeddedFile(app, embed.link, file.path))
 			.filter((target): target is TFile => target !== null && target.extension === 'base')
 			.map((target) => target.path);
 		return {

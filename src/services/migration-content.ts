@@ -1,9 +1,10 @@
-import { getFrontMatterInfo, parseLinktext, parseYaml, stringifyYaml, type App } from 'obsidian';
+import { getFrontMatterInfo, parseYaml, stringifyYaml, type App } from 'obsidian';
 import { inspectMigrationEmbeds, migrationEmbedBlock } from '../domain/migration-embeds';
 import type { PlaylistMigration } from '../domain/playlist-migration';
 import type { NotePlayerSettings } from '../types/settings';
 import { LEGACY_TRACKS_KEY } from '../domain/config';
 import { hasType } from '../utils/frontmatter';
+import { resolveEmbeddedFile } from './embed-resolution';
 
 export function migrationFrontmatter(content: string): Record<string, unknown> {
 	const info = getFrontMatterInfo(content);
@@ -22,7 +23,14 @@ export interface MigrationContentSource {
 export function migrationEmbeds(content: string, source: MigrationContentSource) {
 	const info = getFrontMatterInfo(content);
 	return inspectMigrationEmbeds(content.slice(info.exists ? info.contentStart : 0), (linktext) =>
-		source.app.metadataCache.getFirstLinkpathDest(parseLinktext(linktext).path, source.notePath));
+		resolveEmbeddedFile(source.app, linktext, source.notePath));
+}
+
+export function migrationEmbedReviewReason(embeds: ReturnType<typeof migrationEmbeds>): string {
+	const unresolved = embeds.unresolvedEmbeds;
+	return unresolved.length
+		? `Needs review: ${unresolved.join(', ')} ${unresolved.length === 1 ? 'does' : 'do'} not point to a .base file; include .base in the embed link.`
+		: 'Needs review: companion embed is ambiguous; skipped.';
 }
 
 export function alreadyConverted(content: string, source: MigrationContentSource, settings: NotePlayerSettings): boolean {
@@ -51,7 +59,7 @@ export function convertMigrationContent(content: string, edit: MigrationNoteEdit
 		throw new Error('Playlist changed after preview. Run the converter again.');
 	}
 	const embeds = migrationEmbeds(content, { app, notePath: playlist.notePath });
-	if (embeds.needsReview) throw new Error('Needs review: companion embed is ambiguous; skipped.');
+	if (embeds.needsReview) throw new Error(migrationEmbedReviewReason(embeds));
 	const paired = embeds.ownedBases[0] ?? embeds.embeddedBases[0];
 	if (paired && paired !== playlist.basePath) {
 		throw new Error('Playlist companion changed after preview. Run the converter again.');

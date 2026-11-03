@@ -3,6 +3,8 @@ import { App, Component } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { NOTICE_CATALOG, renderNotice } from '../src/domain/notices';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
+import { collectNoteSnapshots } from '../src/services/vault-io';
+import { buildMusicLibrary } from '../src/domain/library-index';
 import { notices, state } from './helpers/migration-obsidian';
 
 vi.mock('obsidian', () => import('./helpers/migration-obsidian'));
@@ -64,13 +66,13 @@ it.each(['![[a/b/X.base]]', '![[a/b/X.base|Alias]]', '> ![[a/b/X.base]]'])(
 	},
 );
 
-it.each(['X', 'X.base', 'X|Alias', 'X.base|Alias', 'X#View|Alias', 'X.base#^row', '../a/b/X.base'])(
-	'B14 reuses a public-resolved short base embed without appending another: %s', async (target) => {
+it.each(['X.base', 'X.base|Alias', 'X.base#View|Alias', 'X.base#^row', '../a/b/X.base'])(
+	'B14 reuses a public-resolved explicit .base embed without appending another: %s', async (target) => {
 		const { host, note, fake } = await fixture(`![[${target}]]`);
 		const base = host.app.vault.getFileByPath(basePath);
 		const resolve = host.app.metadataCache.getFirstLinkpathDest.bind(host.app.metadataCache);
 		vi.spyOn(host.app.metadataCache, 'getFirstLinkpathDest').mockImplementation((link, source) =>
-			['X', 'X.base', '../a/b/X.base'].includes(link) && source === notePath ? base : resolve(link, source));
+			['X.base', '../a/b/X.base'].includes(link) && source === notePath ? base : resolve(link, source));
 
 		await convertPlaylistNotes(host);
 
@@ -79,6 +81,46 @@ it.each(['X', 'X.base', 'X|Alias', 'X.base|Alias', 'X#View|Alias', 'X.base#^row'
 		expect(notices.at(-1)).toBe(complete);
 	},
 );
+
+it.each(['X', 'X|Alias', 'a/b/X'])('reports an unresolved extensionless embed without redirecting it to a base: %s', async (target) => {
+	const embed = `![[${target}]]`;
+	const { host, fake } = await fixture(embed);
+	const before = new Map(fake.contents);
+
+	await convertPlaylistNotes(host);
+
+	expect(fake.contents).toEqual(before);
+	expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual([basePath]);
+	expect(notices.at(-1)).toContain(embed);
+	expect(notices.at(-1)).toContain('.base');
+	expect(host.saveSettings).not.toHaveBeenCalled();
+});
+
+it.each(['#ViewName', '#^row'])('retains a migrated subpath %s companion in the library with every resolved track', async (subpath) => {
+	const { host, note, fake } = await fixture(`![[${basePath}${subpath}]]`);
+	const track = await host.app.vault.create('Tracks/A.md',
+		'---\n{"type":"music","source":"https://youtu.be/dQw4w9WgXcQ"}\n---\nTrack body\n');
+	const legacy = ['[[Tracks/A]]', '[[Missing]]'];
+	await host.app.vault.process(note, () =>
+		`---\n${JSON.stringify({ type: 'music-playlist', songs: legacy })}\n---\n![[${basePath}${subpath}]]\n`);
+
+	await convertPlaylistNotes(host);
+	const snapshots = collectNoteSnapshots(host.app, ['Playlists'], host.settings);
+	const library = buildMusicLibrary(snapshots, host.settings, new Map());
+
+	expect(library.playlists.map((playlist) => ({
+		path: playlist.path, base: playlist.basePath, tracks: playlist.trackPaths, queueLength: playlist.tracks.length,
+	}))).toEqual([{ path: notePath, base: basePath, tracks: [track.path], queueLength: 1 }]);
+	expect(fake.cache.get(notePath)?.frontmatter.tracks_legacy).toEqual(legacy);
+	expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual([basePath]);
+	expect(fake.contents.get(notePath)?.split('\n').slice(3).join('\n')).toBe(`![[${basePath}${subpath}]]\n`);
+	const before = new Map(fake.contents);
+
+	await convertPlaylistNotes(host);
+
+	expect(fake.contents).toEqual(before);
+	expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_already_bases.template));
+});
 
 it.each(['note', 'membership'])('B15 unload during pending %s confirmation detaches listeners and prevents further writes', async (phase) => {
 	const { host, note, fake } = await fixture('Body');

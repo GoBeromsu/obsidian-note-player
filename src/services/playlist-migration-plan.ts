@@ -4,7 +4,7 @@ import { planPlaylistMigration, type MigrationPlaylistInput, type PlaylistMigrat
 import type { NotePlayerSettings } from '../types/settings';
 import { hasType } from '../utils/frontmatter';
 import { parsePlaylistTrackReference } from '../utils/wikilink';
-import { migrationEmbeds } from './migration-content';
+import { migrationEmbeds, migrationEmbedReviewReason } from './migration-content';
 
 // A base created before an interrupted conversion must be recoverable without claiming a user's base.
 export const MIGRATION_BASE_MARKER = '# note-player migration for: ';
@@ -53,7 +53,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			const raw: unknown = frontmatter[legacyKey] ?? frontmatter.tracks_legacy;
 			const refs: unknown[] = Array.isArray(raw) ? raw : [];
 			const embeds = migrationEmbeds(content, { app, notePath: file.path });
-			if (embeds.needsReview) throw new Error('Needs review: companion embed is ambiguous; skipped.');
+			if (embeds.needsReview) throw new Error(migrationEmbedReviewReason(embeds));
 			const embeddedBases = new Set([...embeds.ownedBases, ...embeds.embeddedBases]);
 			let pendingBase: string | undefined;
 			if (!embeddedBases.size) {
