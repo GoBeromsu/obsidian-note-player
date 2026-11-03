@@ -1,4 +1,11 @@
-import { App, Plugin } from 'obsidian';
+import {
+  App,
+  Plugin,
+  type SettingDefinitionControl,
+  type SettingDefinitionItem,
+  type SettingDefinitionRender,
+  type SettingGroupItem,
+} from 'obsidian';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, normalizeSettings, normalizeSettingValue } from '../src/domain/config';
 import { NotePlayerSettingsTab } from '../src/ui/settings';
@@ -6,8 +13,10 @@ import { NotePlayerSettingsTab } from '../src/ui/settings';
 vi.mock('obsidian', () => ({
   App: class {},
   Plugin: class {},
-  PluginSettingTab: class {},
-  AbstractInputSuggest: class {},
+  PluginSettingTab: class { constructor(public app: unknown) {} },
+  FuzzySuggestModal: class {},
+  renderResults: vi.fn(),
+  setIcon: vi.fn(),
   // The assertions concern immediate settings state, not Obsidian's deferred persistence.
   debounce: () => Object.assign(vi.fn(), { run: vi.fn() }),
 }));
@@ -127,19 +136,70 @@ describe('normalizeSettings', () => {
   });
 });
 
+const manifest = {
+  id: 'note-player',
+  name: 'Note Player',
+  version: '0.8.9',
+  minAppVersion: '1.14.4',
+  description: 'Settings test',
+  author: 'Test',
+};
+
+function appWithFolders(paths: string[]): App {
+  return Object.assign(new App(), { vault: { getAllFolders: () => paths.map((path) => ({ path })) } });
+}
+
+type Row = SettingDefinitionItem | SettingGroupItem;
+
+function flattenDefinitions(items: SettingDefinitionItem[]): Row[] {
+  return items.flatMap((item): Row[] => ('items' in item ? item.items ?? [] : [item]));
+}
+
+const isControlRow = (row: Row): row is SettingDefinitionControl => 'control' in row && row.control !== undefined;
+const isRenderRow = (row: Row): row is SettingDefinitionRender => 'render' in row && typeof row.render === 'function';
+
+describe('settings definitions', () => {
+  const app = appWithFolders(['Music/Sub', 'Inbox', 'Music']);
+  const host = new SettingsHostStub(app, manifest);
+  host.settings = { ...DEFAULT_SETTINGS, playlistFolder: 'Inbox', musicFolder: '' };
+  const rows = flattenDefinitions(new NotePlayerSettingsTab(app, host).getSettingDefinitions());
+  const controls = rows.filter(isControlRow).map((row) => row.control);
+  const dropdownOptions = (key: string) => {
+    const control = controls.find((candidate) => candidate.key === key);
+    return control?.type === 'dropdown' ? control.options : null;
+  };
+
+  it('offers folders as dropdowns rooted at the vault root, surfacing the legacy empty value only where saved', () => {
+    const options = dropdownOptions('playlistFolder');
+    expect(Object.keys(options ?? {})).toEqual(['/', 'Inbox', 'Music', 'Music/Sub']);
+    expect(options?.['/']).toBe('Vault root');
+    const music = dropdownOptions('musicFolder');
+    expect(Object.keys(music ?? {})).toEqual(['/', '', 'Inbox', 'Music', 'Music/Sub']);
+    expect(music?.['']).toBe('Default location (legacy)');
+  });
+
+  it('renders every mapping key through a picker row instead of a text or folder control', () => {
+    expect(controls.filter((control) => control.type === 'text' || control.type === 'folder')).toEqual([]);
+    const pickerRows = rows.filter(isRenderRow).filter((row) => typeof row.desc === 'string' && row.desc.includes('Default: '));
+    expect(pickerRows.map((row) => row.name)).toEqual([
+      'URL property',
+      'Thumbnail property',
+      'Artist property',
+      'Membership property',
+      'Description property',
+      'Cover property',
+      'Music note type',
+      'Playlist note type',
+    ]);
+  });
+});
+
 describe('settings control value normalization', () => {
   it.each(Object.entries(defaults).flatMap(([key, expected]) =>
     ['', '  '].map((value) => ({ key, value, expected })),
   ))('stores $expected when the $key control is emptied', ({ key, value, expected }) => {
     const app = new App();
-    const host = new SettingsHostStub(app, {
-      id: 'note-player',
-      name: 'Note Player',
-      version: '0.8.9',
-      minAppVersion: '1.14.4',
-      description: 'Settings test',
-      author: 'Test',
-    });
+    const host = new SettingsHostStub(app, manifest);
     host.settings = { ...DEFAULT_SETTINGS, [key]: 'custom' };
     const tab = new NotePlayerSettingsTab(app, host);
 
