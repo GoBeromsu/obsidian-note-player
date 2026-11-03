@@ -74,6 +74,6 @@ export function convertMigrationContent(content: string, edit: MigrationNoteEdit
 		delete fm[key];
 		updated = `${content.slice(0, info.from)}${stringifyYaml(fm).trimEnd()}\n${content.slice(info.to)}`;
 	}
-	if (!paired) updated += `\n${migrationEmbedBlock(playlist.basePath)}\n`;
+	if (!paired && playlist.appendEmbed) updated += `\n${migrationEmbedBlock(playlist.basePath)}\n`;
 	return updated;
 }
