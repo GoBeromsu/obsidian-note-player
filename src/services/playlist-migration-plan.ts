@@ -4,6 +4,7 @@ import { planPlaylistMigration, type MigrationPlaylistInput, type PlaylistMigrat
 import type { NotePlayerSettings } from '../types/settings';
 import { hasType } from '../utils/frontmatter';
 import { parsePlaylistTrackReference } from '../utils/wikilink';
+import { settledMigrationMetadata } from './migration-metadata';
 
 // A base created before an interrupted conversion must be recoverable without claiming a user's base.
 export const MIGRATION_BASE_MARKER = '# note-player migration for: ';
@@ -43,7 +44,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
 			const frontmatter = Object.fromEntries(Object.entries(parsed));
 			if (!hasType(frontmatter, settings.playlistNoteType)) continue;
-			const cache = app.metadataCache.getFileCache(file);
+			const cache = app.metadataCache.getFileCache(file) ?? (await settledMigrationMetadata(app, file)).cache;
 			if (!cache || [legacyKey, 'tracks_legacy'].some((key) =>
 				JSON.stringify(cache.frontmatter?.[key]) !== JSON.stringify(frontmatter[key]))) {
 				throw new Error('Metadata is not ready. Wait for indexing and run the converter again.');

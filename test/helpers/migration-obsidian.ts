@@ -53,16 +53,21 @@ export class App {
 	readonly files = new Map<string, TFile>();
 	readonly contents = new Map<string, string>();
 	readonly cache = new Map<string, Cache>();
+	readonly parsedBodies = new Map<string, readonly string[]>();
 	readonly handlers = new Set<Changed>();
+	readonly resolvedHandlers = new Set<() => void>();
+	readonly modifyHandlers = new Set<(file: TFile) => void>();
 	readonly pending: { file: TFile; data: string }[] = [];
 	pauseIndexing = false;
 	onWrite: (file: TFile) => void = () => {};
-	onSubscribe: () => void = () => {};
+	onSubscribe: (name: string) => void = () => {};
 	constructor() { apps.set(this, this); }
 
 	index(file: TFile, data: string): void {
 		if (file.extension !== 'md') return;
 		const cache = cacheFor(data);
+		const parsed = this.parsedBodies.get(body(data));
+		if (parsed) cache.embeds = parsed.map((link) => ({ link, original: `![[${link}]]` }));
 		this.cache.set(file.path, cache);
 		for (const handler of this.handlers) handler(file, data, cache);
 	}
@@ -71,16 +76,27 @@ export class App {
 		for (const { file, data } of this.pending.splice(0)) this.index(file, data);
 	}
 
+	resolve(): void {
+		this.flush();
+		for (const handler of this.resolvedHandlers) handler();
+	}
+
 	private write(file: TFile, data: string): void {
 		this.contents.set(file.path, data);
 		file.stat.mtime++;
 		file.stat.size = data.length;
+		for (const handler of this.modifyHandlers) handler(file);
 		if (this.pauseIndexing) this.pending.push({ file, data });
 		else this.index(file, data);
 		this.onWrite(file);
 	}
 
 	readonly vault = {
+		on: (_name: 'modify', callback: (file: TFile) => void) => {
+			this.modifyHandlers.add(callback);
+			return { callback };
+		},
+		offref: (ref: { callback: (file: TFile) => void }) => { this.modifyHandlers.delete(ref.callback); },
 		getMarkdownFiles: () => [...this.files.values()].filter((file) => file.extension === 'md'),
 		getAllLoadedFiles: () => [...this.files.values()],
 		getFileByPath: (path: string) => this.files.get(path) ?? null,
@@ -106,12 +122,16 @@ export class App {
 			const path = link.replace(/\.md$/, '');
 			return this.files.get(link) ?? this.files.get(`${path}.md`) ?? null;
 		},
-		on: (_name: string, callback: Changed) => {
-			this.handlers.add(callback);
-			this.onSubscribe();
+		on: (...[name, callback]: ['changed', Changed] | ['resolved', () => void]) => {
+			if (name === 'changed') this.handlers.add(callback);
+			else this.resolvedHandlers.add(callback);
+			this.onSubscribe(name);
 			return { callback };
 		},
-		offref: (ref: { callback: Changed }) => { this.handlers.delete(ref.callback); },
+		offref: (ref: { callback: Changed | (() => void) }) => {
+			for (const handler of this.handlers) if (handler === ref.callback) this.handlers.delete(handler);
+			for (const handler of this.resolvedHandlers) if (handler === ref.callback) this.resolvedHandlers.delete(handler);
+		},
 	};
 
 	readonly fileManager = {

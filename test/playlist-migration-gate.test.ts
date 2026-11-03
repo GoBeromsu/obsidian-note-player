@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { NOTICE_CATALOG, renderNotice } from '../src/domain/notices';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
 import { updateFrontmatter } from '../src/services/vault-io';
+import { observeMigrationMetadata, settledMigrationMetadata } from '../src/services/migration-metadata';
 import * as noticeService from '../src/ui/notices';
 import type { PlaylistMigrationPlan } from '../src/domain/playlist-migration';
 import { notices, state } from './helpers/migration-obsidian';
@@ -13,6 +14,7 @@ const preview = vi.hoisted(() => ({
 	finish: undefined as ((confirmed: boolean) => void) | undefined,
 	opened: () => {},
 }));
+const observers: (() => void)[] = [];
 vi.mock('obsidian', () => import('./helpers/migration-obsidian'));
 vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
 	MigrationPreviewModal: class {
@@ -32,10 +34,12 @@ function signal<T>() {
 	return { promise, resolve };
 }
 
-async function fixture() {
+async function fixture(resolved = true) {
 	const app = new App();
+	observers.push(observeMigrationMetadata(app));
 	await app.vault.create('Playlists/Mix.md', '---\n{"type":"music-playlist","songs":["[[Tracks/A]]"]}\n---\nOriginal body\n');
 	await app.vault.create('Tracks/A.md', '---\n{"type":"music","playlists":["[[Other]]"]}\n---\nTrack body\n');
+	if (resolved) state(app).resolve();
 	return {
 		app, settings: { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists', legacyPlaylistTrackProperty: 'songs' },
 		saveSettings: vi.fn(() => Promise.resolve()),
@@ -63,6 +67,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	for (const dispose of observers.splice(0)) dispose();
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -110,7 +116,10 @@ describe('migration gate regressions', () => {
 			await host.app.vault.create('Playlists/Mix.base', 'views: []\n');
 			const original = await host.app.vault.read(note);
 			await host.app.vault.process(note, () => `${original}\n![[Playlists/Mix.base]]\n`);
-			fake.contents.set(note.path, `${original}\n${example}\n`);
+			fake.pauseIndexing = true;
+			await host.app.vault.process(note, () => `${original}\n${example}\n`);
+			fake.pauseIndexing = false;
+			fake.onSubscribe = (name) => { if (name === 'resolved') fake.flush(); };
 
 			await run(host);
 
@@ -125,6 +134,10 @@ describe('migration gate regressions', () => {
 		const host = await fixture();
 		const fake = state(host.app);
 		fake.pauseIndexing = true;
+		fake.onSubscribe = (name) => { if (name === 'resolved') fake.flush(); };
+		fake.onWrite = (file) => {
+			if (file.path === 'Playlists/Mix.md') fake.flush();
+		};
 		const write = host.app.fileManager.processFrontMatter.bind(host.app.fileManager);
 		let interruptions = 2;
 		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementation(async (file, edit) => {
@@ -150,7 +163,33 @@ describe('migration gate regressions', () => {
 		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 0, missing: 0 }));
 	});
 
-	it('checks embed presence inside the atomic process callback', async () => {
+	it.each([
+		{ body: '> ~~~md\n> ![[Playlists/Mix.base]]\n> ~~~\n', embeds: [], append: true },
+		{ body: '`example\n\n![[Playlists/Mix.base]]\n\n`end\n', embeds: ['Playlists/Mix.base'], append: false },
+	])('uses native parsed embeds for Markdown block boundaries: $body', async ({ body, embeds, append }) => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing note');
+		await host.app.vault.create('Playlists/Mix.base', 'views: []\n');
+		const header = '---\n{"type":"music-playlist","songs":["[[Tracks/A]]"]}\n---\n';
+		await host.app.vault.process(note, () => `${header}![[Playlists/Mix.base]]\n`);
+		// Canned native-parser results: the fake is an event source, not a Markdown oracle.
+		fake.parsedBodies.set(body, embeds);
+		fake.parsedBodies.set(`${body}\n![[Playlists/Mix.base]]\n`, [...embeds, 'Playlists/Mix.base']);
+		fake.pauseIndexing = true;
+		await host.app.vault.process(note, () => header + body);
+		fake.pauseIndexing = false;
+		fake.onSubscribe = (name) => { if (name === 'resolved') fake.flush(); };
+
+		await run(host);
+
+		const expectedBody = append ? `${body}\n![[Playlists/Mix.base]]\n` : body;
+		expect(fake.contents.get(note.path)?.split('\n').slice(3).join('\n')).toBe(expectedBody);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 0 }));
+	});
+
+	it('rejects a changed version inside the atomic callback without appending a duplicate', async () => {
 		const host = await fixture();
 		const fake = state(host.app);
 		const process = host.app.vault.process.bind(host.app.vault);
@@ -162,23 +201,25 @@ describe('migration gate regressions', () => {
 		await run(host);
 
 		expect(fake.contents.get('Playlists/Mix.md')?.match(/!\[\[Playlists\/Mix\.base\]\]/g)).toEqual(['![[Playlists/Mix.base]]']);
+		expect(notices.at(-1)).toContain(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 0, tracks: 1, missing: 0 }));
 	});
 
-	it('does not report success if the embed is removed during the archive write', async () => {
+	it.each(['', '\n![[Playlists/Mix.base]]\n\n![[Playlists/Mix.base]]\n'])(
+		'does not report success if the archive write leaves other than one parsed embed: %s', async (replacement) => {
 		const host = await fixture();
 		const fake = state(host.app);
 		const write = host.app.fileManager.processFrontMatter.bind(host.app.fileManager);
 		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementation(async (file, edit) => {
 			await write(file, edit);
 			if (file.path === 'Playlists/Mix.md') {
-				await host.app.vault.process(file, (content) => content.replace('\n![[Playlists/Mix.base]]\n', ''));
+				await host.app.vault.process(file, (content) => content.replace('\n![[Playlists/Mix.base]]\n', replacement));
 			}
 		});
 		const failed = vi.spyOn(noticeService, 'showNotice');
 
 		await run(host);
 
-		expect(fake.contents.get('Playlists/Mix.md')).not.toContain('![[Playlists/Mix.base]]');
+		expect(fake.cache.get('Playlists/Mix.md')?.embeds).toHaveLength(replacement ? 2 : 0);
 		expect(notices.at(-1)).toContain(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 0, tracks: 1, missing: 0 }));
 		expect(failed).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: 'Playlists/Mix.md' }));
 	});
@@ -199,25 +240,84 @@ describe('migration gate regressions', () => {
 	it('does not announce completion while a legacy playlist has no metadata', async () => {
 		const host = await fixture();
 		const fake = state(host.app);
+		const before = new Map(fake.contents);
 		fake.cache.delete('Playlists/Mix.md');
 		const notice = vi.spyOn(noticeService, 'showNotice');
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
 
-		await convertPlaylistNotes(host);
+		const done = convertPlaylistNotes(host);
+		await vi.runAllTimersAsync();
+		await done;
 
 		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
 		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: 'Playlists/Mix.md' }));
 		expect(fake.contents.get('Playlists/Mix.md')).toContain('"songs":');
+		expect(fake.contents).toEqual(before);
 		notice.mockRestore();
+	});
+
+	it('waits for initial native resolution before making any conversion writes', async () => {
+		const host = await fixture(false);
+		const fake = state(host.app);
+		const note = fake.files.get('Playlists/Mix.md');
+		if (!note) throw new Error('Missing note');
+		fake.cache.delete(note.path);
+		let resolved = false;
+		let prematureWrites = 0;
+		fake.onWrite = () => { if (!resolved) prematureWrites++; };
+		fake.onSubscribe = (name) => {
+			if (name !== 'resolved' || resolved) return;
+			fake.index(note, fake.contents.get(note.path) ?? '');
+			resolved = true;
+			fake.resolve();
+		};
+
+		await run(host);
+
+		expect(resolved).toBe(true);
+		expect(prematureWrites).toBe(0);
+		expect(fake.cache.get(note.path)?.embeds.map((embed) => embed.link)).toEqual(['Playlists/Mix.base']);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 0 }));
+	});
+
+	it.each(['', '\nEdited body\n'])('times out without writes when the indexed version lags a file edit, then recovers: %s', async (suffix) => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing note');
+		await settledMigrationMetadata(host.app, note);
+		fake.pauseIndexing = true;
+		await host.app.vault.process(note, (content) => content + suffix);
+		const before = new Map(fake.contents);
+		const baseline = fake.handlers.size;
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+
+		const done = run(host);
+		await vi.runAllTimersAsync();
+		await done;
+
+		expect(fake.contents).toEqual(before);
+		expect(fake.handlers.size).toBe(baseline);
+		expect(fake.resolvedHandlers.size).toBe(1);
+		expect(notices.at(-1)).toContain(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 0, tracks: 0, missing: 0 }));
+		fake.pauseIndexing = false;
+		fake.flush();
+		await run(host);
+		expect(fake.cache.get(note.path)?.embeds.map((embed) => embed.link)).toEqual(['Playlists/Mix.base']);
 	});
 
 	it('keeps the indexed conversion pending until metadata acknowledges its write', async () => {
 		const host = await fixture();
 		const fake = state(host.app);
+		const baseline = fake.handlers.size;
 		fake.pauseIndexing = true;
 		const boundary = signal<'subscribed' | 'completed'>();
 		const written = signal<void>();
 		fake.onSubscribe = () => boundary.resolve('subscribed');
 		fake.onWrite = (file) => {
+			if (file.path === 'Playlists/Mix.md' && !fake.contents.get(file.path)?.includes('"tracks_legacy":')) fake.flush();
 			if (file.path === 'Playlists/Mix.md' && fake.contents.get(file.path)?.includes('"tracks_legacy":')) written.resolve();
 		};
 		const opened = signal<void>();
@@ -234,12 +334,13 @@ describe('migration gate regressions', () => {
 			fake.flush();
 			await done;
 		}
-		expect(fake.handlers.size).toBe(0);
+		expect(fake.handlers.size).toBe(baseline);
 	});
 
 	it('ignores a stale same-file event delivered before the frontmatter write finishes', async () => {
 		const host = await fixture();
 		const fake = state(host.app);
+		const baseline = fake.handlers.size;
 		fake.pauseIndexing = true;
 		const file = host.app.vault.getFileByPath('Tracks/A.md');
 		if (!file) throw new Error('Missing track');
@@ -260,7 +361,7 @@ describe('migration gate regressions', () => {
 		if (!indexedFile) throw new Error('Missing fake file');
 		fake.index(indexedFile, before);
 		try {
-			expect(fake.handlers.size).toBe(1);
+			expect(fake.handlers.size).toBe(baseline + 1);
 		} finally {
 			release.resolve();
 			await written.promise;
@@ -268,6 +369,6 @@ describe('migration gate regressions', () => {
 			await done;
 		}
 		expect(fake.cache.get(file.path)?.frontmatter.playlists).toEqual(['[[Playlists/Mix]]']);
-		expect(fake.handlers.size).toBe(0);
+		expect(fake.handlers.size).toBe(baseline);
 	});
 });

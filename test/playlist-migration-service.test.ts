@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
+import { observeMigrationMetadata } from '../src/services/migration-metadata';
+import { state } from './helpers/migration-obsidian';
 import type { PlaylistMigrationPlan } from '../src/domain/playlist-migration';
 
 const preview = vi.hoisted(() => ({
@@ -9,6 +11,7 @@ const preview = vi.hoisted(() => ({
 	finish: undefined as ((confirmed: boolean) => void) | undefined,
 	opened: () => {},
 }));
+const observers: (() => void)[] = [];
 
 vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
 	MigrationPreviewModal: class {
@@ -36,8 +39,10 @@ function readNote(app: App, path: string): Promise<string> {
 
 async function fixture(legacyKey = 'songs') {
 	const app = new App();
+	observers.push(observeMigrationMetadata(app));
 	await seed(app, 'Playlists/Mix.md', { type: 'music-playlist', [legacyKey]: ['[[Tracks/A]]', '[[Missing]]'] });
 	await seed(app, 'Tracks/A.md', { type: 'music', playlists: ['[[Other]]'] });
+	state(app).resolve();
 	return {
 		app,
 		settings: { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists', legacyPlaylistTrackProperty: legacyKey },
@@ -61,6 +66,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	for (const dispose of observers.splice(0)) dispose();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -157,10 +163,10 @@ describe('playlist migration service', () => {
 	it('does not duplicate bases or memberships when metadata still contains the legacy state', async () => {
 		const host = await fixture('tracks');
 		const stale = { type: 'music-playlist', tracks: ['[[Tracks/A]]', '[[Missing]]'] };
-		vi.spyOn(host.app.metadataCache, 'getFileCache').mockReturnValue({ frontmatter: stale });
 		const { done } = await openPreview(host);
 		preview.finish?.(true);
 		await done;
+		vi.spyOn(host.app.metadataCache, 'getFileCache').mockReturnValue({ frontmatter: stale });
 		const paths = host.app.vault.getAllLoadedFiles().map((file) => file.path);
 		const note = await readNote(host.app, 'Playlists/Mix.md');
 		const track = await readNote(host.app, 'Tracks/A.md');

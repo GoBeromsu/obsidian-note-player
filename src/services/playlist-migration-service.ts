@@ -1,15 +1,16 @@
-import { getFrontMatterInfo, Notice, parseYaml, type App } from 'obsidian';
+import { getFrontMatterInfo, Notice, parseYaml, type App, type CachedMetadata } from 'obsidian';
 import { createPlaylistBaseContent } from '../domain/base-files';
 import { LEGACY_TRACKS_KEY } from '../domain/config';
 import { NOTICE_CATALOG, renderNotice } from '../domain/notices';
 import type { PlaylistMigration } from '../domain/playlist-migration';
 import type { NotePlayerSettings } from '../types/settings';
 import { hasType } from '../utils/frontmatter';
-import { embeddedWikilinks, parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
+import { parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
 import { showNotice } from '../ui/notices';
 import { MigrationPreviewModal } from '../ui/views/MigrationPreviewModal';
 import { collectMigrationPlan, MIGRATION_BASE_MARKER, type MigrationFailure, type MigrationScan } from './playlist-migration-plan';
 import { withMetadataSettled } from './vault-io';
+import { settledMigrationMetadata } from './migration-metadata';
 
 interface MigrationHost {
 	readonly app: App;
@@ -87,8 +88,10 @@ async function applyMigration(
 				}
 				const note = app.vault.getFileByPath(playlist.notePath);
 				if (!note) throw new Error('Playlist note no longer exists.');
-				const hasEmbed = (content: string) => embeddedWikilinks(content.slice(getFrontMatterInfo(content).contentStart))
-					.some((link) => app.metadataCache.getFirstLinkpathDest(link, note.path)?.path === playlist.basePath);
+				await settledMigrationMetadata(app, note);
+				const embedCount = (cache: CachedMetadata) =>
+					(cache.embeds ?? []).filter((embed) =>
+						app.metadataCache.getFirstLinkpathDest(embed.link, note.path)?.path === playlist.basePath).length;
 				if (playlist.createBase) {
 					await app.vault.create(playlist.basePath,
 						`${MIGRATION_BASE_MARKER}${JSON.stringify(note.path)}\n${createPlaylistBaseContent(settings)}`);
@@ -118,9 +121,18 @@ async function applyMigration(
 					}
 					if (added) linked++;
 				}
+				const indexed = await settledMigrationMetadata(app, note);
+				if (embedCount(indexed.cache) > 1) throw new Error('Multiple companion base embeds exist; skipped.');
 				await withMetadataSettled(app, note, async () => {
-					await app.vault.process(note, (content) => hasEmbed(content) ? content : `${content}\n![[${playlist.basePath}]]\n`);
-					if (playlist.renameLegacyKey) {
+					await app.vault.process(note, (content) => {
+						if (content !== indexed.data || note.stat.mtime !== indexed.mtime || note.stat.size !== indexed.size) {
+							throw new Error('Metadata is not ready for the current playlist version. Run the converter again.');
+						}
+						return embedCount(indexed.cache) ? content : `${content}\n![[${playlist.basePath}]]\n`;
+					});
+				});
+				if (playlist.renameLegacyKey) {
+					await withMetadataSettled(app, note, async () => {
 						const key = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
 						await app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
 							if (Object.hasOwn(fm, 'tracks_legacy')) throw new Error('tracks_legacy already exists; skipped.');
@@ -128,9 +140,9 @@ async function applyMigration(
 							fm.tracks_legacy = fm[key];
 							delete fm[key];
 						});
-					}
-				});
-				if (!hasEmbed(await app.vault.read(note))) {
+					});
+				}
+				if (embedCount((await settledMigrationMetadata(app, note)).cache) !== 1) {
 					throw new Error('Companion base embed was not preserved. Run the converter again.');
 				}
 				converted++;
