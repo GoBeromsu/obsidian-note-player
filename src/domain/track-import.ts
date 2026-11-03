@@ -63,19 +63,6 @@ export function buildMusicFrontmatter(
   return frontmatter;
 }
 
-/** Notes linking to `filePath`, split into playlists (relinked by the heal) and anything else (renaming would break those). */
-export function classifyBacklinks(
-  resolvedLinks: Record<string, Record<string, number>>,
-  filePath: string,
-  playlistPaths: ReadonlySet<string>,
-): { playlistSources: string[]; elsewhere: boolean } {
-  const sources = Object.keys(resolvedLinks).filter((source) => resolvedLinks[source]?.[filePath]);
-  return {
-    playlistSources: sources.filter((source) => playlistPaths.has(source)),
-    elsewhere: sources.some((source) => !playlistPaths.has(source)),
-  };
-}
-
 export function classifyImport(
   videoId: string,
   tracks: ReadonlyArray<{ path: string; videoId: string }>,

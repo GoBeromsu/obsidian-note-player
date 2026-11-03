@@ -1,4 +1,5 @@
 import type { PeaksStore } from '../services/peaks-store';
+import type { PlaylistNote } from './music';
 import type { PlaybackState, RepeatMode } from './playback';
 import type { TurntableStyle } from './settings';
 
@@ -52,7 +53,7 @@ export interface PlaylistViewState {
 /**
  * UI contract assumptions:
  * - state changes are pushed through subscribe()
- * - queue order is persisted by moveTrackInPlaylist()
+ * - queue order follows the paired base's sort
  * - playNext()/playPrevious() update currentTrack in the next emitted state
  * - if setAutoplayEnabled is missing, the UI falls back to toggleAutoplay()
  * - if openBase() is missing, the UI simply hides base-navigation actions
@@ -60,6 +61,9 @@ export interface PlaylistViewState {
 export interface PlaylistViewHost {
 	getState(): PlaylistViewState;
 	subscribe(onChange: () => void): () => void;
+	onStateChange(onChange: () => void): () => void;
+	getPlaylistByPath(path: string): PlaylistNote | null;
+	playPlaylist(companionPath: string, startTrackPath: string | null): Promise<void>;
 	refresh(notify?: boolean): Promise<void>;
 	selectPlaylist(path: string | null): Promise<void>;
 	selectActivePlaylist?(): Promise<void>;
@@ -71,7 +75,6 @@ export interface PlaylistViewHost {
 	addActiveNoteToPlaylist?(): Promise<void>;
 	addTrackFromUrl?(input: string): Promise<void>;
 	removeTrackFromPlaylist(path: string): Promise<void>;
-	moveTrackInPlaylist(fromIndex: number, toIndex: number): Promise<void>;
 	openNote(path: string): Promise<void>;
 	openPlaylist(path: string): Promise<void>;
 	openBase?(kind: 'music' | 'playlists'): Promise<void>;

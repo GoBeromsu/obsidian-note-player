@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PROPERTY_MAPPING } from '../src/domain/config';
-import { buildMusicFrontmatter, classifyBacklinks, classifyImport, isUnavailable, parseFlatPlaylistOutput, parseOembed, titleState, trackLabel } from '../src/domain/track-import';
+import { buildMusicFrontmatter, classifyImport, isUnavailable, parseFlatPlaylistOutput, parseOembed, titleState, trackLabel } from '../src/domain/track-import';
 
 describe('parseOembed', () => {
   it('reads title and author without the oEmbed thumbnail', () => {
@@ -120,25 +120,6 @@ describe('isUnavailable', () => {
     expect(isUnavailable({ title: 'wOzHXgqNpe8', artist: '', videoId: 'wOzHXgqNpe8' })).toBe(true);
     expect(isUnavailable({ title: 'wOzHXgqNpe8', artist: 'Band', videoId: 'wOzHXgqNpe8' })).toBe(false);
     expect(isUnavailable({ title: 'Song', artist: '', videoId: 'wOzHXgqNpe8' })).toBe(false);
-  });
-});
-
-describe('classifyBacklinks', () => {
-  const links = {
-    'Inbox.md': { 'Song.md': 1 },
-    'Road Trip.md': { 'Song.md': 2, 'Other.md': 1 },
-    'Journal.md': { 'Song.md': 1 },
-    'Unrelated.md': { 'Other.md': 1 },
-  };
-  const playlists = new Set(['Inbox.md', 'Road Trip.md']);
-
-  it('splits playlist backlinks from other notes', () => {
-    expect(classifyBacklinks(links, 'Song.md', playlists)).toEqual({ playlistSources: ['Inbox.md', 'Road Trip.md'], elsewhere: true });
-  });
-
-  it('is safe to rename when only playlists link to it', () => {
-    expect(classifyBacklinks(links, 'Other.md', new Set(['Road Trip.md', 'Unrelated.md']))).toEqual({ playlistSources: ['Road Trip.md', 'Unrelated.md'], elsewhere: false });
-    expect(classifyBacklinks(links, 'Nobody.md', playlists)).toEqual({ playlistSources: [], elsewhere: false });
   });
 });
 

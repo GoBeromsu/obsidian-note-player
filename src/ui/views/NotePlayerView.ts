@@ -50,7 +50,6 @@ export class NotePlayerView extends ItemView {
 	private unsubscribe: (() => void) | null = null;
 	private resizeObserver: ResizeObserver | null = null;
 	private resizeFrame: { win: Window; id: number } | null = null;
-	private dragFromIndex: number | null = null;
 	private lastRenderedTrackPath: string | null = null;
 	private lastCount: { path: string; count: number; changedAt: number } | null = null;
 	private progressIntervalId: number | null = null;
@@ -205,8 +204,6 @@ export class NotePlayerView extends ItemView {
 					host: this.host,
 					run: this.runAction,
 					selectedPlaylist: this.getSelectedPlaylist(state),
-					getDragFrom: () => this.dragFromIndex,
-					setDragFrom: (index) => { this.dragFromIndex = index; },
 				});
 		} finally {
 			this.isRendering = false;
