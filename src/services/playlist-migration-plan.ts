@@ -52,7 +52,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			frontmatters.set(file.path, frontmatter);
 			const raw: unknown = frontmatter[legacyKey] ?? frontmatter.tracks_legacy;
 			const refs: unknown[] = Array.isArray(raw) ? raw : [];
-			const embeds = migrationEmbeds(content, [...existingPaths].filter((path) => path.endsWith('.base')));
+			const embeds = migrationEmbeds(content, { app, notePath: file.path });
 			if (embeds.needsReview) throw new Error('Needs review: companion embed is ambiguous; skipped.');
 			const embeddedBases = new Set([...embeds.ownedBases, ...embeds.embeddedBases]);
 			let pendingBase: string | undefined;

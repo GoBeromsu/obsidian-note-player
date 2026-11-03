@@ -1,4 +1,4 @@
-import type { App } from 'obsidian';
+import type { App, Component } from 'obsidian';
 import { createPlaylistBaseContent } from '../domain/base-files';
 import { createCompanionNoteContent, playlistFilePaths } from '../domain/playlist-files';
 import { getPlaylistOrThrow } from '../domain/playlist-manager';
@@ -11,6 +11,7 @@ import { ensureFolder, updateFrontmatter, waitForMetadata } from './vault-io';
 
 interface PlaylistServiceHost {
   readonly app: App;
+  readonly owner: Component;
   getSettings(): NotePlayerSettings;
   getLibrary(): MusicLibrarySnapshot;
   refresh(): Promise<void>;
@@ -62,7 +63,7 @@ export class PlaylistService {
       const playlist = getPlaylistOrThrow(playlistPath, library.playlists);
       const property = this.host.getSettings().playlistMembershipProperty;
       for (const path of new Set(edit.paths)) {
-        await updateFrontmatter(app, path, (frontmatter) => {
+        await updateFrontmatter(this.host, path, (frontmatter) => {
           const current: unknown = frontmatter[property];
           const entries: unknown[] = Array.isArray(current) ? current : current == null ? [] : [current];
           const seen = new Set<string>();

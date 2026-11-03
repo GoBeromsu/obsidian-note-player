@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, parseYaml, stringifyYaml } from 'obsidian';
+import { getFrontMatterInfo, parseLinktext, parseYaml, stringifyYaml, type App } from 'obsidian';
 import { inspectMigrationEmbeds, migrationEmbedBlock } from '../domain/migration-embeds';
 import type { PlaylistMigration } from '../domain/playlist-migration';
 import type { NotePlayerSettings } from '../types/settings';
@@ -14,35 +14,43 @@ export function migrationFrontmatter(content: string): Record<string, unknown> {
 	return Object.fromEntries(Object.entries(parsed));
 }
 
-export function migrationEmbeds(content: string, basePaths: readonly string[]) {
-	const info = getFrontMatterInfo(content);
-	return inspectMigrationEmbeds(content.slice(info.exists ? info.contentStart : 0), basePaths);
+export interface MigrationContentSource {
+	readonly app: App;
+	readonly notePath: string;
 }
 
-export function alreadyConverted(content: string, basePaths: readonly string[], settings: NotePlayerSettings): boolean {
-	const embeds = migrationEmbeds(content, basePaths);
+export function migrationEmbeds(content: string, source: MigrationContentSource) {
+	const info = getFrontMatterInfo(content);
+	return inspectMigrationEmbeds(content.slice(info.exists ? info.contentStart : 0), (linktext) =>
+		source.app.metadataCache.getFirstLinkpathDest(parseLinktext(linktext).path, source.notePath));
+}
+
+export function alreadyConverted(content: string, source: MigrationContentSource, settings: NotePlayerSettings): boolean {
+	const embeds = migrationEmbeds(content, source);
 	const fm = migrationFrontmatter(content);
 	const key = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
-	return !embeds.needsReview && embeds.ownedBases.length === 1
-		&& basePaths.includes(embeds.ownedBases[0] ?? '') && hasType(fm, settings.playlistNoteType)
+	const path = embeds.embeddedBases[0];
+	return !embeds.needsReview && embeds.embeddedBases.length === 1
+		&& path !== undefined && source.app.vault.getFileByPath(path)?.extension === 'base'
+		&& hasType(fm, settings.playlistNoteType)
 		&& Array.isArray(fm.tracks_legacy) && (key === 'tracks_legacy' || !Object.hasOwn(fm, key));
 }
 
 export interface MigrationNoteEdit {
 	readonly playlist: PlaylistMigration;
 	readonly settings: NotePlayerSettings;
-	readonly basePaths: readonly string[];
+	readonly app: App;
 	readonly frontmatter: Record<string, unknown>;
 }
 
 /** Called only inside Vault.process, so both decisions describe the same current bytes. */
 export function convertMigrationContent(content: string, edit: MigrationNoteEdit): string {
-	const { playlist, settings, basePaths, frontmatter: preview } = edit;
+	const { playlist, settings, app, frontmatter: preview } = edit;
 	const fm = migrationFrontmatter(content);
 	if (!hasType(fm, settings.playlistNoteType) || JSON.stringify(fm) !== JSON.stringify(preview)) {
 		throw new Error('Playlist changed after preview. Run the converter again.');
 	}
-	const embeds = migrationEmbeds(content, [...basePaths, playlist.basePath]);
+	const embeds = migrationEmbeds(content, { app, notePath: playlist.notePath });
 	if (embeds.needsReview) throw new Error('Needs review: companion embed is ambiguous; skipped.');
 	const paired = embeds.ownedBases[0] ?? embeds.embeddedBases[0];
 	if (paired && paired !== playlist.basePath) {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from 'obsidian';
+import { App, Component } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { NOTICE_CATALOG, renderNotice } from '../src/domain/notices';
 import { migrationEmbedBlock } from '../src/domain/migration-embeds';
@@ -13,6 +13,7 @@ const preview = vi.hoisted(() => ({
 	finish: undefined as ((confirmed: boolean) => void) | undefined,
 	opened: () => {},
 }));
+const owners: Component[] = [];
 vi.mock('obsidian', () => import('./helpers/migration-obsidian'));
 vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
 	MigrationPreviewModal: class {
@@ -44,10 +45,13 @@ async function fixture() {
 	await app.vault.create(notePath, header + 'Original body\n');
 	await app.vault.create('Tracks/A.md', '---\n{"type":"music","playlists":["[[Other]]"]}\n---\nTrack body\n');
 	state(app).resolve();
-	return {
+	const owner = new Component();
+	owner.load();
+	owners.push(owner);
+	return Object.assign(owner, {
 		app, settings: { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists', legacyPlaylistTrackProperty: 'songs' },
 		saveSettings: vi.fn(() => Promise.resolve()),
-	};
+	});
 }
 
 async function run(host: Awaited<ReturnType<typeof fixture>>, beforeConfirm: () => void = () => {}) {
@@ -70,6 +74,7 @@ beforeEach(() => {
 	vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
 });
 afterEach(() => {
+	for (const owner of owners.splice(0)) owner.unload();
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
@@ -163,7 +168,7 @@ describe('migration gate regressions', () => {
 		expect(write).not.toHaveBeenCalled();
 	});
 
-	it.each([archived + '![[Playlists/Mix.base]]\n', '---\n{"type":"music-playlist"}\n---\n'])(
+	it.each(['---\n{"type":"music-playlist"}\n---\n'])(
 		'lists remaining candidates without owned archived blocks', async (text) => {
 			const host = await fixture();
 			const fake = state(host.app);

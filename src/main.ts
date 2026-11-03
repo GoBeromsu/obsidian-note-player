@@ -56,6 +56,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   private volume: VolumeController | null = null;
   private readonly playlists = new PlaylistService({
     app: this.app,
+    owner: this,
     getSettings: () => this.settings,
     getLibrary: () => this.library,
     refresh: () => this.refreshIndex(),

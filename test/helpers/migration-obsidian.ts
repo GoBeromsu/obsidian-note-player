@@ -7,6 +7,36 @@ type Cache = {
 	embeds: { link: string; original: string; position: Pos }[];
 };
 type Changed = (file: TFile, data: string, cache: Cache) => void;
+const eventCleanup = new WeakMap<object, () => void>();
+
+export class Component {
+	private loaded = false;
+	private readonly children = new Set<Component>();
+	private readonly cleanup: (() => void)[] = [];
+	load(): void {
+		if (this.loaded) return;
+		this.loaded = true;
+		for (const child of this.children) child.load();
+	}
+	unload(): void {
+		if (!this.loaded) return;
+		this.loaded = false;
+		for (const child of this.children) child.unload();
+		for (const callback of this.cleanup.splice(0).reverse()) callback();
+	}
+	addChild<T extends Component>(child: T): T {
+		this.children.add(child);
+		if (this.loaded) child.load();
+		return child;
+	}
+	removeChild<T extends Component>(child: T): T {
+		this.children.delete(child);
+		child.unload();
+		return child;
+	}
+	register(callback: () => void): void { this.cleanup.push(callback); }
+	registerEvent(ref: object): void { this.register(() => eventCleanup.get(ref)?.()); }
+}
 
 const frontmatter = (content: string): Record<string, unknown> => JSON.parse(content.split('\n')[1] ?? '{}');
 const body = (content: string) => content.split('\n').slice(3).join('\n');
@@ -167,13 +197,15 @@ export class App {
 		getFileCache: (file: TFile) => this.cache.get(file.path) ?? null,
 		getFirstLinkpathDest: (link: string) => {
 			const path = link.replace(/\.md$/, '');
-			return this.files.get(link) ?? this.files.get(`${path}.md`) ?? null;
+			return this.files.get(link) ?? this.files.get(`${path}.md`) ?? this.files.get(`${path}.base`) ?? null;
 		},
 		on: (...[name, callback]: ['changed', Changed] | ['resolved', () => void]) => {
 			if (name === 'changed') this.handlers.add(callback);
 			else this.resolvedHandlers.add(callback);
 			this.onSubscribe(name);
-			return { callback };
+			const ref = { callback };
+			eventCleanup.set(ref, () => this.metadataCache.offref(ref));
+			return ref;
 		},
 		offref: (ref: { callback: Changed | (() => void) }) => {
 			for (const handler of this.handlers) if (handler === ref.callback) this.handlers.delete(handler);
@@ -204,3 +236,6 @@ export const getFrontMatterInfo = (content: string) => ({
 });
 export const parseYaml = (value: string): unknown => JSON.parse(value);
 export const stringifyYaml = (value: unknown): string => JSON.stringify(value) + '\n';
+export const parseLinktext = (value: string) => ({
+	path: value.split('#')[0] ?? '', subpath: value.includes('#') ? value.slice(value.indexOf('#')) : '',
+});

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from 'obsidian';
+import { App, Component } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
 import { notices, state } from './helpers/migration-obsidian';
@@ -11,6 +11,7 @@ const preview = vi.hoisted(() => ({
 	finish: undefined as ((confirmed: boolean) => void) | undefined,
 	opened: () => {},
 }));
+const owners: Component[] = [];
 
 vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
 	MigrationPreviewModal: class {
@@ -41,11 +42,14 @@ async function fixture(legacyKey = 'songs') {
 	await seed(app, 'Playlists/Mix.md', { type: 'music-playlist', [legacyKey]: ['[[Tracks/A]]', '[[Missing]]'] });
 	await seed(app, 'Tracks/A.md', { type: 'music', playlists: ['[[Other]]'] });
 	state(app).resolve();
-	return {
+	const owner = new Component();
+	owner.load();
+	owners.push(owner);
+	return Object.assign(owner, {
 		app,
 		settings: { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists', legacyPlaylistTrackProperty: legacyKey },
 		saveSettings: vi.fn(() => Promise.resolve()),
-	};
+	});
 }
 
 async function openPreview(host: Awaited<ReturnType<typeof fixture>>) {
@@ -65,6 +69,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	for (const owner of owners.splice(0)) owner.unload();
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();

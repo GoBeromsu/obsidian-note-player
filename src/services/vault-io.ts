@@ -1,4 +1,4 @@
-import { normalizePath, parseYaml, TFile, TFolder, type App, type CachedMetadata } from 'obsidian';
+import { Component, normalizePath, parseYaml, TFile, TFolder, type App, type CachedMetadata } from 'obsidian';
 import type { CompanionBaseFile } from '../domain/base-files';
 import { VAULT_ROOT } from '../domain/config';
 import { collectScopedFiles } from '../domain/music-scope';
@@ -43,43 +43,59 @@ function nextMetadataChange(app: App, file: TFile, timeoutMs = 2000): Promise<vo
 	});
 }
 
+export interface VaultWriteHost {
+	readonly app: App;
+	readonly owner: Component;
+}
+
 /** Edits only the given frontmatter keys; resolves once the metadata cache has re-parsed the note. */
-export async function updateFrontmatter(app: App, path: string, edit: (frontmatter: Record<string, unknown>) => void): Promise<void> {
+export async function updateFrontmatter(host: VaultWriteHost, path: string, edit: (frontmatter: Record<string, unknown>) => void): Promise<void> {
+	const { app } = host;
 	const file = app.vault.getAbstractFileByPath(path);
 	if (!(file instanceof TFile)) {
 		throw new Error(`File not found: ${path}`);
 	}
-	await withMetadataSettled(app, file, () => app.fileManager.processFrontMatter(file, edit));
+	await withMetadataSettled(host, file, () => app.fileManager.processFrontMatter(file, edit));
 }
 
 /** Subscribe before editing; only a cache event for the final written bytes establishes settlement. */
-export async function withMetadataSettled(app: App, file: TFile, write: () => Promise<void>): Promise<CachedMetadata | undefined> {
-	const before = await app.vault.read(file);
+export async function withMetadataSettled(host: VaultWriteHost, file: TFile, write: () => Promise<void>): Promise<CachedMetadata | undefined> {
+	const { app, owner } = host;
+	const scope = owner.addChild(new Component());
+	const cancellation = new Error(`Metadata wait cancelled for ${file.path}.`);
+	let cancelled = false;
+	let cancel: () => void = () => {};
+	scope.register(() => { cancelled = true; cancel(); });
 	const win = activeWindow;
 	let expected: string | undefined;
 	let indexed: string | undefined;
 	let indexedCache: CachedMetadata | undefined;
 	let finish: () => void = () => {};
 	let timer: number | undefined;
-	const ref = app.metadataCache.on('changed', (changed, data, cache) => {
-		if (changed.path !== file.path) return;
-		indexed = data;
-		indexedCache = cache;
-		if (expected !== undefined && data === expected) finish();
-	});
+	scope.register(() => { if (timer !== undefined) win.clearTimeout(timer); });
 	try {
+		const before = await app.vault.read(file);
+		if (cancelled) throw cancellation;
+		scope.registerEvent(app.metadataCache.on('changed', (changed, data, cache) => {
+			if (changed.path !== file.path) return;
+			indexed = data;
+			indexedCache = cache;
+			if (expected !== undefined && data === expected) finish();
+		}));
 		await write();
+		if (cancelled) throw cancellation;
 		expected = await app.vault.read(file);
+		if (cancelled) throw cancellation;
 		if (indexed === expected) return indexedCache;
 		if (expected === before) return;
 		await new Promise<void>((resolve, reject) => {
 			finish = resolve;
+			cancel = () => reject(cancellation);
 			timer = win.setTimeout(() => reject(new Error(`Metadata did not settle for ${file.path}. Run the converter again.`)), 2000);
 		});
 		return indexedCache;
 	} finally {
-		if (timer !== undefined) win.clearTimeout(timer);
-		app.metadataCache.offref(ref);
+		owner.removeChild(scope);
 	}
 }
 

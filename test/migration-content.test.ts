@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { App } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { inspectMigrationEmbeds, migrationEmbedBlock } from '../src/domain/migration-embeds';
 import { alreadyConverted, convertMigrationContent } from '../src/services/migration-content';
@@ -13,9 +14,13 @@ const edit = {
 		membershipAdds: [], renameLegacyKey: true, missing: [],
 	},
 	settings: { ...DEFAULT_SETTINGS, legacyPlaylistTrackProperty: 'songs' },
-	basePaths: [base],
+	app: new App(),
 	frontmatter,
 };
+const source = { app: edit.app, notePath: edit.playlist.notePath };
+beforeEach(async () => {
+	if (!edit.app.vault.getFileByPath(base)) await edit.app.vault.create(base, 'views: []\n');
+});
 
 describe('migration content decisions', () => {
 	it.each([
@@ -58,7 +63,7 @@ describe('migration content decisions', () => {
 	});
 
 	it('pairs an exact owned block even before the base exists', () => {
-		expect(inspectMigrationEmbeds(migrationEmbedBlock(base), [])).toEqual({
+		expect(inspectMigrationEmbeds(migrationEmbedBlock(base), () => null)).toEqual({
 			ownedBases: [base], embeddedBases: [base], needsReview: false,
 		});
 	});
@@ -70,14 +75,14 @@ describe('migration content decisions', () => {
 		const second = convertMigrationContent(first, { ...edit, frontmatter: archive });
 
 		expect(second).toBe(first);
-		expect(alreadyConverted(second, [base], edit.settings)).toBe(true);
+		expect(alreadyConverted(second, source, edit.settings)).toBe(true);
 	});
 
 	it.each([
-		'![[Bases/Mix.base]]',
-		'%% note-player:playlist-base %%\n\n![[Bases/Mix.base]]',
-		'%% note-player:playlist-base %%\n![[Bases/Mix.base|Alias]]',
-	])('requires the exact owned block for a no-op claim: %s', (body) => {
-		expect(alreadyConverted(`---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n${body}`, [base], edit.settings)).toBe(false);
+		{ body: '![[Bases/Mix.base]]', converted: true },
+		{ body: '%% note-player:playlist-base %%\n\n![[Bases/Mix.base]]', converted: false },
+		{ body: '%% note-player:playlist-base %%\n![[Bases/Mix.base|Alias]]', converted: false },
+	])('classifies archived user embeds and malformed owned blocks: $body', ({ body, converted }) => {
+		expect(alreadyConverted(`---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n${body}`, source, edit.settings)).toBe(converted);
 	});
 });

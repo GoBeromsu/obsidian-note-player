@@ -4,15 +4,18 @@ export function migrationEmbedBlock(basePath: string): string {
 	return `${MIGRATION_EMBED_MARKER}\n![[${basePath}]]`;
 }
 
+export type MigrationLinkResolver = (linktext: string) =>
+	{ readonly path: string; readonly extension: string } | null;
+
 /** This is a conservative migration recognizer, not a Markdown parser. */
-export function inspectMigrationEmbeds(content: string, basePaths: readonly string[]) {
+export function inspectMigrationEmbeds(content: string, resolve: MigrationLinkResolver) {
 	const lines = content.split(/\r?\n/);
-	const ownedBases = lines.flatMap((line, index) => {
+	const ownedPaths = lines.flatMap((line, index) => {
 		const path = line === MIGRATION_EMBED_MARKER
 			? /^!\[\[([^\]|]+\.base)\]\]$/.exec(lines[index + 1] ?? '')?.[1] : undefined;
 		return path ? [path] : [];
 	});
-	const paths = [...new Set([...basePaths, ...ownedBases])];
+	const ownedBases: string[] = [];
 	const embeddedBases: string[] = [];
 	let needsReview = false;
 	let fence: { readonly character: string; readonly length: number; readonly quotes: number } | undefined;
@@ -23,6 +26,11 @@ export function inspectMigrationEmbeds(content: string, basePaths: readonly stri
 		if (line === MIGRATION_EMBED_MARKER) {
 			const owned = /^!\[\[([^\]|]+\.base)\]\]$/.exec(lines[index + 1] ?? '')?.[1];
 			if (!owned) needsReview = true;
+			else {
+				const target = resolve(owned);
+				if (target && target.extension !== 'base') needsReview = true;
+				ownedBases.push(target?.path ?? owned);
+			}
 			if (fence || comment || inlineDelimiter) needsReview = true;
 			continue;
 		}
@@ -45,11 +53,11 @@ export function inspectMigrationEmbeds(content: string, basePaths: readonly stri
 		if (line.includes('<!--')) comment = true;
 		for (const match of line.matchAll(/!\[\[([^\]\n]+)\]\]/g)) {
 			const target = match[1]?.split('|')[0] ?? '';
-			const matches = paths.filter((base) => target === base || target === base.replace(/\.base$/, ''));
-			const path = matches[0];
-			if (matches.length > 1) needsReview = true;
+			const resolved = resolve(target);
+			const path = resolved?.extension === 'base' ? resolved.path
+				: !resolved && ownedPaths.includes(target) ? target : undefined;
 			if (!path) {
-				if (target.endsWith('.base')) needsReview = true;
+				if (!resolved) needsReview = true;
 				continue;
 			}
 			// Inline code, escaped syntax, comments and indented blocks need human interpretation.
