@@ -1,5 +1,6 @@
 type Cache = { frontmatter: Record<string, unknown>; embeds: { link: string; original: string }[] };
 type Changed = (file: TFile, data: string, cache: Cache) => void;
+type Version = { mtime: number; size: number };
 
 const frontmatter = (content: string): Record<string, unknown> => JSON.parse(content.split('\n')[1] ?? '{}');
 const body = (content: string) => content.split('\n').slice(3).join('\n');
@@ -53,41 +54,54 @@ export class App {
 	readonly files = new Map<string, TFile>();
 	readonly contents = new Map<string, string>();
 	readonly cache = new Map<string, Cache>();
+	readonly fileCache: Record<string, Version> = {};
 	readonly parsedBodies = new Map<string, readonly string[]>();
 	readonly handlers = new Set<Changed>();
 	readonly resolvedHandlers = new Set<() => void>();
 	readonly modifyHandlers = new Set<(file: TFile) => void>();
-	readonly pending: { file: TFile; data: string }[] = [];
+	readonly pending: { file: TFile; data: string; version: Version }[] = [];
+	asyncIndexing = false;
+	initiallyResolved = false;
 	pauseIndexing = false;
 	onWrite: (file: TFile) => void = () => {};
 	onSubscribe: (name: string) => void = () => {};
 	constructor() { apps.set(this, this); }
 
-	index(file: TFile, data: string): void {
+	index(file: TFile, data: string, version: Version = { ...file.stat }): void {
 		if (file.extension !== 'md') return;
 		const cache = cacheFor(data);
 		const parsed = this.parsedBodies.get(body(data));
 		if (parsed) cache.embeds = parsed.map((link) => ({ link, original: `![[${link}]]` }));
 		this.cache.set(file.path, cache);
+		this.metadataCache.fileCache[file.path] = { ...version };
 		for (const handler of this.handlers) handler(file, data, cache);
 	}
 
 	flush(): void {
-		for (const { file, data } of this.pending.splice(0)) this.index(file, data);
+		for (const { file, data, version } of this.pending.splice(0)) this.index(file, data, version);
 	}
 
 	resolve(): void {
 		this.flush();
+		this.initiallyResolved = true;
 		for (const handler of this.resolvedHandlers) handler();
 	}
 
 	private write(file: TFile, data: string): void {
 		this.contents.set(file.path, data);
 		file.stat.mtime++;
-		file.stat.size = data.length;
+		file.stat.size = new TextEncoder().encode(data).byteLength;
 		for (const handler of this.modifyHandlers) handler(file);
-		if (this.pauseIndexing) this.pending.push({ file, data });
-		else this.index(file, data);
+		const version = { mtime: file.stat.mtime, size: file.stat.size };
+		if (this.pauseIndexing) this.pending.push({ file, data, version });
+		else {
+			const index = () => {
+				this.index(file, data, version);
+				if (this.initiallyResolved) for (const handler of this.resolvedHandlers) handler();
+			};
+			if (this.asyncIndexing) queueMicrotask(index);
+			else index();
+		}
 		this.onWrite(file);
 	}
 
@@ -117,6 +131,7 @@ export class App {
 	};
 
 	readonly metadataCache = {
+		fileCache: this.fileCache,
 		getFileCache: (file: TFile) => this.cache.get(file.path) ?? null,
 		getFirstLinkpathDest: (link: string) => {
 			const path = link.replace(/\.md$/, '');

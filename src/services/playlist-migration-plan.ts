@@ -17,6 +17,7 @@ export interface MigrationFailure {
 export interface MigrationScan {
 	readonly plan: PlaylistMigrationPlan;
 	readonly failures: readonly MigrationFailure[];
+	readonly versions: ReadonlyMap<TFile, Awaited<ReturnType<typeof settledMigrationMetadata>>>;
 }
 
 export async function collectMigrationPlan(app: App, settings: NotePlayerSettings, notePath?: string): Promise<MigrationScan> {
@@ -24,6 +25,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 	const folder = settings.playlistFolder.replace(/^\/|\/$/g, '');
 	const playlists: MigrationPlaylistInput[] = [];
 	const failures: MigrationFailure[] = [];
+	const versions = new Map<TFile, Awaited<ReturnType<typeof settledMigrationMetadata>>>();
 	const membership = new Map<string, string[]>();
 	const existingPaths = new Set(app.vault.getAllLoadedFiles().map((file) => file.path));
 	const resolve = (raw: unknown, source: string): TFile | null => {
@@ -44,11 +46,13 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
 			const frontmatter = Object.fromEntries(Object.entries(parsed));
 			if (!hasType(frontmatter, settings.playlistNoteType)) continue;
-			const cache = app.metadataCache.getFileCache(file) ?? (await settledMigrationMetadata(app, file)).cache;
-			if (!cache || [legacyKey, 'tracks_legacy'].some((key) =>
+			const indexed = await settledMigrationMetadata(app, file);
+			const { cache } = indexed;
+			if (indexed.data !== content || [legacyKey, 'tracks_legacy'].some((key) =>
 				JSON.stringify(cache.frontmatter?.[key]) !== JSON.stringify(frontmatter[key]))) {
 				throw new Error('Metadata is not ready. Wait for indexing and run the converter again.');
 			}
+			versions.set(file, indexed);
 			const raw: unknown = frontmatter[legacyKey] ?? frontmatter.tracks_legacy;
 			const refs: unknown[] = Array.isArray(raw) ? raw : [];
 			const embeddedBases = new Set<string>();
@@ -95,5 +99,6 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 	return {
 		plan: planPlaylistMigration({ playlists, trackMembership: membership, mapping: settings, existingPaths }),
 		failures,
+		versions,
 	};
 }

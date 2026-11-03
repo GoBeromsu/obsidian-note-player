@@ -34,12 +34,13 @@ function signal<T>() {
 	return { promise, resolve };
 }
 
-async function fixture(resolved = true) {
+async function fixture(resolved = true, lateObserver = false) {
 	const app = new App();
-	observers.push(observeMigrationMetadata(app));
+	if (!lateObserver) observers.push(observeMigrationMetadata(app));
 	await app.vault.create('Playlists/Mix.md', '---\n{"type":"music-playlist","songs":["[[Tracks/A]]"]}\n---\nOriginal body\n');
 	await app.vault.create('Tracks/A.md', '---\n{"type":"music","playlists":["[[Other]]"]}\n---\nTrack body\n');
 	if (resolved) state(app).resolve();
+	if (lateObserver) observers.push(observeMigrationMetadata(app));
 	return {
 		app, settings: { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists', legacyPlaylistTrackProperty: 'songs' },
 		saveSettings: vi.fn(() => Promise.resolve()),
@@ -74,6 +75,105 @@ afterEach(() => {
 });
 
 describe('migration gate regressions', () => {
+	it('converts an already-indexed playlist when the observer attaches after initial resolution', async () => {
+		const host = await fixture(true, true);
+		const fake = state(host.app);
+		fake.asyncIndexing = true;
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+
+		const done = run(host);
+		await vi.runAllTimersAsync();
+		await done;
+
+		expect(fake.cache.get('Playlists/Mix.md')?.embeds.map((embed) => embed.link)).toEqual(['Playlists/Mix.base']);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 0 }));
+		expect(fake.handlers.size).toBe(1);
+		expect(fake.resolvedHandlers.size).toBe(0);
+	});
+
+	it.each([false, true])('never announces no-op for a stale archived embed after interruption=%s', async (interrupted) => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing note');
+		if (interrupted) {
+			const write = host.app.fileManager.processFrontMatter.bind(host.app.fileManager);
+			const fault = vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementation(async (file, edit) => {
+				await write(file, edit);
+				if (file.path === note.path) {
+					fake.pauseIndexing = true;
+					await host.app.vault.process(file, (content) => content.replace('\n![[Playlists/Mix.base]]\n', ''));
+					throw new Error('Post-archive interruption');
+				}
+			});
+			await run(host);
+			fault.mockRestore();
+		} else {
+			await run(host);
+			fake.pauseIndexing = true;
+			await host.app.vault.process(note, (content) => content.replace('\n![[Playlists/Mix.base]]\n', ''));
+		}
+		const before = new Map(fake.contents);
+		notices.length = 0;
+		const notice = vi.spyOn(noticeService, 'showNotice');
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+
+		const retry = run(host);
+		await vi.runAllTimersAsync();
+		await retry;
+
+		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
+		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: note.path }));
+		expect(fake.contents).toEqual(before);
+		expect(fake.handlers.size).toBe(1);
+		expect(fake.resolvedHandlers.size).toBe(0);
+		fake.pauseIndexing = false;
+		fake.flush();
+		await run(host);
+		expect(fake.cache.get(note.path)?.embeds.map((embed) => embed.link)).toEqual(['Playlists/Mix.base']);
+		expect(fake.cache.get(note.path)?.frontmatter.tracks_legacy).toEqual(['[[Tracks/A]]']);
+		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual(['Playlists/Mix.base']);
+	});
+
+	it('rechecks the planned version before announcing no-op after settings persistence', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing note');
+		await run(host);
+		host.settings.legacyPlaylistTrackProperty = 'songs';
+		host.saveSettings.mockImplementationOnce(async () => {
+			fake.pauseIndexing = true;
+			await host.app.vault.process(note, (content) => content.replace('\n![[Playlists/Mix.base]]\n', ''));
+		});
+		const notice = vi.spyOn(noticeService, 'showNotice');
+
+		await convertPlaylistNotes(host);
+
+		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
+		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: note.path }));
+	});
+
+	it.each([null, {}, { mtime: 'unknown', size: 0 }, { mtime: 0, size: 0 }])('does not certify an unknown or mismatched native version after late attachment: %s', async (native) => {
+		const host = await fixture(true, true);
+		const fake = state(host.app);
+		Reflect.set(fake.metadataCache, 'fileCache', { 'Playlists/Mix.md': native });
+		const before = new Map(fake.contents);
+		const notice = vi.spyOn(noticeService, 'showNotice');
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+
+		const done = run(host);
+		await vi.runAllTimersAsync();
+		await done;
+
+		expect(fake.contents).toEqual(before);
+		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
+		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: 'Playlists/Mix.md' }));
+	});
+
 	it.each(['```md\n![[Bases/Example.base]]\n```', '`![[Bases/Example.base]]`'])(
 		'does not pair with a code-only embed: %s', async (example) => {
 			const host = await fixture();
@@ -113,7 +213,7 @@ describe('migration gate regressions', () => {
 			const fake = state(host.app);
 			const note = host.app.vault.getFileByPath('Playlists/Mix.md');
 			if (!note) throw new Error('Missing note');
-			await host.app.vault.create('Playlists/Mix.base', 'views: []\n');
+			await host.app.vault.create('Playlists/Mix.base', '# note-player migration for: "Playlists/Mix.md"\nviews: []\n');
 			const original = await host.app.vault.read(note);
 			await host.app.vault.process(note, () => `${original}\n![[Playlists/Mix.base]]\n`);
 			fake.pauseIndexing = true;
@@ -171,7 +271,7 @@ describe('migration gate regressions', () => {
 		const fake = state(host.app);
 		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
 		if (!note) throw new Error('Missing note');
-		await host.app.vault.create('Playlists/Mix.base', 'views: []\n');
+		await host.app.vault.create('Playlists/Mix.base', '# note-player migration for: "Playlists/Mix.md"\nviews: []\n');
 		const header = '---\n{"type":"music-playlist","songs":["[[Tracks/A]]"]}\n---\n';
 		await host.app.vault.process(note, () => `${header}![[Playlists/Mix.base]]\n`);
 		// Canned native-parser results: the fake is an event source, not a Markdown oracle.
@@ -291,6 +391,7 @@ describe('migration gate regressions', () => {
 		await host.app.vault.process(note, (content) => content + suffix);
 		const before = new Map(fake.contents);
 		const baseline = fake.handlers.size;
+		const notice = vi.spyOn(noticeService, 'showNotice');
 		vi.useFakeTimers();
 		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
 
@@ -300,8 +401,9 @@ describe('migration gate regressions', () => {
 
 		expect(fake.contents).toEqual(before);
 		expect(fake.handlers.size).toBe(baseline);
-		expect(fake.resolvedHandlers.size).toBe(1);
-		expect(notices.at(-1)).toContain(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 0, tracks: 0, missing: 0 }));
+		expect(fake.resolvedHandlers.size).toBe(0);
+		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: note.path }));
+		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
 		fake.pauseIndexing = false;
 		fake.flush();
 		await run(host);
@@ -345,6 +447,7 @@ describe('migration gate regressions', () => {
 		const file = host.app.vault.getFileByPath('Tracks/A.md');
 		if (!file) throw new Error('Missing track');
 		const before = await host.app.vault.read(file);
+		const beforeStat = { ...file.stat };
 		const entered = signal<void>();
 		const release = signal<void>();
 		const written = signal<void>();
@@ -359,7 +462,7 @@ describe('migration gate regressions', () => {
 		await entered.promise;
 		const indexedFile = fake.files.get(file.path);
 		if (!indexedFile) throw new Error('Missing fake file');
-		fake.index(indexedFile, before);
+		fake.index(indexedFile, before, beforeStat);
 		try {
 			expect(fake.handlers.size).toBe(baseline + 1);
 		} finally {

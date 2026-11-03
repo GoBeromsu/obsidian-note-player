@@ -44,6 +44,14 @@ async function previewMigration(host: MigrationHost): Promise<void> {
 		const cleanup = await clearLegacySetting(host);
 		for (const { path: name, reason } of cleanup) showNotice('migration_failed', { name, reason });
 		if (cleanup.length) return;
+		for (const [file, indexed] of scan.versions) {
+			if (host.app.vault.getFileByPath(file.path) !== file
+				|| file.stat.mtime !== indexed.mtime || file.stat.size !== indexed.size
+				|| host.app.metadataCache.getFileCache(file) !== indexed.cache) {
+				showNotice('migration_failed', { name: file.path, reason: 'Metadata is not ready. Wait for indexing and run the converter again.' });
+				return;
+			}
+		}
 		showNotice('migration_already_bases');
 		return;
 	}

@@ -1,4 +1,4 @@
-import { TFile, type App, type CachedMetadata } from 'obsidian';
+import type { App, CachedMetadata, TFile } from 'obsidian';
 
 interface IndexedVersion {
 	readonly mtime: number;
@@ -7,40 +7,24 @@ interface IndexedVersion {
 	readonly data: string;
 }
 
-interface MetadataState {
-	versions: WeakMap<TFile, IndexedVersion>;
-	dirty: WeakSet<TFile>;
-	resolved: boolean;
-}
-
-const states = new WeakMap<App, MetadataState>();
+const states = new WeakMap<App, WeakMap<TFile, IndexedVersion>>();
 
 /** CachedMetadata has no public version stamp; record native parser events instead. */
 export function observeMigrationMetadata(app: App): () => void {
-	const state: MetadataState = { versions: new WeakMap(), dirty: new WeakSet(), resolved: false };
-	states.set(app, state);
+	const versions = new WeakMap<TFile, IndexedVersion>();
+	states.set(app, versions);
 	const changed = app.metadataCache.on('changed', (file, data, cache) => {
-		state.versions.set(file, { mtime: file.stat.mtime, size: file.stat.size, cache, data });
-	});
-	const modified = app.vault.on('modify', (file) => {
-		if (file instanceof TFile) state.dirty.add(file);
-	});
-	const resolved = app.metadataCache.on('resolved', () => {
-		state.resolved = true;
-		state.versions = new WeakMap();
-		state.dirty = new WeakSet();
+		versions.set(file, { mtime: file.stat.mtime, size: file.stat.size, cache, data });
 	});
 	return () => {
 		app.metadataCache.offref(changed);
-		app.metadataCache.offref(resolved);
-		app.vault.offref(modified);
 		states.delete(app);
 	};
 }
 
 export function settledMigrationMetadata(app: App, file: TFile): Promise<IndexedVersion> {
-	const state = states.get(app);
-	if (!state) return Promise.reject(new Error('Metadata is not ready. Wait for indexing and run the converter again.'));
+	const versions = states.get(app);
+	if (!versions) return Promise.reject(new Error('Metadata is not ready. Wait for indexing and run the converter again.'));
 	const win = activeWindow;
 	return new Promise((resolve, reject) => {
 		let active = true;
@@ -48,14 +32,20 @@ export function settledMigrationMetadata(app: App, file: TFile): Promise<Indexed
 			try {
 				const { mtime, size } = file.stat;
 				const data = await app.vault.read(file);
-				if (!active || !state.resolved || file.stat.mtime !== mtime || file.stat.size !== size) return;
+				if (!active || file.stat.mtime !== mtime || file.stat.size !== size) return;
 				const cache = app.metadataCache.getFileCache(file);
 				if (!cache) return;
-				const indexed = state.versions.get(file);
+				const indexed = versions.get(file);
 				const matches = indexed?.mtime === mtime && indexed.size === size && indexed.cache === cache && indexed.data === data;
-				if (!matches && (indexed || state.dirty.has(file))) return;
+				// Native getFileCache uses fileCache[path].hash; its stamp survives late observer attachment.
+				// This field is not public API: an unknown format must never certify a cached snapshot.
+				const fileCache: unknown = Reflect.get(app.metadataCache, 'fileCache');
+				const native: unknown = fileCache && typeof fileCache === 'object' ? Reflect.get(fileCache, file.path) : null;
+				const nativeMatches = native && typeof native === 'object'
+					&& Reflect.get(native, 'mtime') === mtime && Reflect.get(native, 'size') === size;
+				if (!matches && !nativeMatches) return;
 				const version = { mtime, size, cache, data };
-				state.versions.set(file, version);
+				versions.set(file, version);
 				finish();
 				resolve(version);
 			} catch (error: unknown) {
