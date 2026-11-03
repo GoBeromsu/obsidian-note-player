@@ -3,11 +3,13 @@ import {
 	debounce,
 	Plugin,
 	PluginSettingTab,
+	TFolder,
 	type ButtonComponent,
 	type ExtraButtonComponent,
 	type Setting,
 	type SettingDefinitionItem,
 	type SettingDefinitionRender,
+	type TAbstractFile,
 } from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/config';
 import { buildFolderOptions } from '../domain/settings-options';
@@ -43,6 +45,16 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 
 	constructor(app: App, private readonly host: SettingsHost) {
 		super(app, host);
+		// Obsidian renders the definitions cached by update(), so folder changes must refresh the dropdown options.
+		const refreshDefinitions = debounce(() => this.update(), 250, true);
+		const onFolderChange = (file: TAbstractFile) => {
+			if (file instanceof TFolder) refreshDefinitions();
+		};
+		app.workspace.onLayoutReady(() => {
+			host.registerEvent(app.vault.on('create', onFolderChange));
+			host.registerEvent(app.vault.on('delete', onFolderChange));
+			host.registerEvent(app.vault.on('rename', onFolderChange));
+		});
 	}
 
 	getControlValue(key: string): unknown {

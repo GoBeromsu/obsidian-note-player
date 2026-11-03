@@ -1,6 +1,7 @@
 import {
   App,
   Plugin,
+  TFolder,
   type SettingDefinitionControl,
   type SettingDefinitionItem,
   type SettingDefinitionRender,
@@ -13,12 +14,16 @@ import { NotePlayerSettingsTab } from '../src/ui/settings';
 vi.mock('obsidian', () => ({
   App: class {},
   Plugin: class {},
-  PluginSettingTab: class { constructor(public app: unknown) {} },
+  PluginSettingTab: class {
+    constructor(public app: unknown) {}
+    update = vi.fn();
+  },
   FuzzySuggestModal: class {},
+  TFolder: class {},
   renderResults: vi.fn(),
   setIcon: vi.fn(),
   // The assertions concern immediate settings state, not Obsidian's deferred persistence.
-  debounce: () => Object.assign(vi.fn(), { run: vi.fn() }),
+  debounce: (fn: () => void) => Object.assign(vi.fn(fn), { run: vi.fn() }),
 }));
 
 class SettingsHostStub extends Plugin {
@@ -26,6 +31,7 @@ class SettingsHostStub extends Plugin {
   saveSettings = vi.fn(() => Promise.resolve());
   refresh = vi.fn(() => Promise.resolve());
   refreshCompanionBases = vi.fn(() => Promise.resolve());
+  registerEvent = vi.fn();
 }
 
 const defaults = {
@@ -145,8 +151,18 @@ const manifest = {
   author: 'Test',
 };
 
-function appWithFolders(paths: string[]): App {
-  return Object.assign(new App(), { vault: { getAllFolders: () => paths.map((path) => ({ path })) } });
+type VaultListener = (file: unknown) => void;
+
+function appWithFolders(paths: string[]): App & { listeners: Record<string, VaultListener> } {
+  const listeners: Record<string, VaultListener> = {};
+  return Object.assign(new App(), {
+    listeners,
+    workspace: { onLayoutReady: (cb: () => void) => cb() },
+    vault: {
+      getAllFolders: () => paths.map((path) => ({ path })),
+      on: (name: string, cb: VaultListener) => { listeners[name] = cb; return { name }; },
+    },
+  });
 }
 
 type Row = SettingDefinitionItem | SettingGroupItem;
@@ -192,13 +208,26 @@ describe('settings definitions', () => {
       'Playlist note type',
     ]);
   });
+
+  it('refreshes the cached definitions when a vault folder changes, ignoring files', () => {
+    const folderApp = appWithFolders(['Inbox']);
+    const folderHost = new SettingsHostStub(folderApp, manifest);
+    const tab = new NotePlayerSettingsTab(folderApp, folderHost);
+    expect(Object.keys(folderApp.listeners).sort()).toEqual(['create', 'delete', 'rename']);
+    expect(folderHost.registerEvent).toHaveBeenCalledTimes(3);
+    folderApp.listeners.create?.({ path: 'note.md' });
+    expect(tab.update).not.toHaveBeenCalled();
+    folderApp.listeners.create?.(new TFolder());
+    folderApp.listeners.rename?.(new TFolder());
+    expect(tab.update).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('settings control value normalization', () => {
   it.each(Object.entries(defaults).flatMap(([key, expected]) =>
     ['', '  '].map((value) => ({ key, value, expected })),
   ))('stores $expected when the $key control is emptied', ({ key, value, expected }) => {
-    const app = new App();
+    const app = appWithFolders([]);
     const host = new SettingsHostStub(app, manifest);
     host.settings = { ...DEFAULT_SETTINGS, [key]: 'custom' };
     const tab = new NotePlayerSettingsTab(app, host);

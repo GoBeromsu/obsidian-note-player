@@ -838,20 +838,31 @@
 	display: none;
 }
 
-/* Settings: a picker is a button wearing Obsidian's .dropdown class; these rules only cover what a <select> gets for free. */
+/* Settings: a picker is a button wearing Obsidian's .dropdown class. Obsidian's `button:not(.clickable-icon)` rule
+   outranks `.dropdown`, so the dropdown tokens are restated here; the fixed width keeps the reset icons in one column. */
 .onp-picker-setting .onp-picker-button {
 	display: inline-block;
-	max-width: 16em;
+	width: 11em;
 	overflow: hidden;
 	line-height: var(--input-height);
-	text-align: left;
+	color: var(--text-normal);
+	background-color: var(--dropdown-background);
+	box-shadow: var(--input-shadow);
+	text-align: end;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.onp-picker-setting .onp-picker-button:hover {
-	background-color: var(--dropdown-background-hover);
-	box-shadow: var(--input-shadow-hover);
+@media (hover: hover) {
+	.onp-picker-setting .onp-picker-button:hover {
+		background-color: var(--dropdown-background-hover);
+		box-shadow: var(--input-shadow-hover);
+	}
+}
+
+.onp-picker-setting .onp-picker-button:focus-visible {
+	box-shadow: 0 0 0 3px var(--background-modifier-border-focus);
+	outline: none;
 }
 
 .onp-picker-setting .extra-setting-button.is-disabled,
