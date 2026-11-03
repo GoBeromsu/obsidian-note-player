@@ -28,7 +28,7 @@ describe('extractYoutubeVideoId', () => {
 
 describe('youtube url builders', () => {
   it('builds thumbnail urls', () => {
-    expect(buildYoutubeThumbnailUrl('DEyzYWLvXqA')).toBe('https://img.youtube.com/vi/DEyzYWLvXqA/mqdefault.jpg');
+    expect(buildYoutubeThumbnailUrl('DEyzYWLvXqA')).toBe('https://i.ytimg.com/vi/DEyzYWLvXqA/hqdefault.jpg');
   });
 });
 
