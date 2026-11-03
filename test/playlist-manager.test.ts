@@ -13,12 +13,12 @@ import type { MusicTrack, PlaylistNote } from '../src/types/music';
 function makePlaylist(path: string, trackPaths: string[] = []): PlaylistNote {
 	return {
 		path,
+		basePath: path.replace(/\.md$/, '.base'),
 		title: path.replace(/\.md$/, ''),
 		coverUrl: '',
 		description: '',
 		trackPaths,
 		tracks: [],
-		missingTrackPaths: [],
 	};
 }
 
@@ -31,7 +31,6 @@ function makeTrack(path: string): MusicTrack {
 		watchUrl: 'https://youtube.com/watch?v=abc',
 		videoId: 'abc',
 		thumbnailUrl: 'https://img.youtube.com/vi/abc/mqdefault.jpg',
-		imageUrl: 'https://img.youtube.com/vi/abc/mqdefault.jpg',
 		tags: ['rock'],
 	};
 }

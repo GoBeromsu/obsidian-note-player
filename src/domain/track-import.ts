@@ -1,16 +1,15 @@
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
-import { buildYoutubeWatchUrl } from '../utils/youtube';
+import { buildYoutubeThumbnailUrl, buildYoutubeWatchUrl } from '../utils/youtube';
 
 export interface TrackMeta {
   videoId: string;
   title: string;
   author: string;
-  thumbnailUrl: string;
 }
 
 export interface FlatPlaylist {
   title: string;
-  entries: Array<Omit<TrackMeta, 'thumbnailUrl'>>;
+  entries: TrackMeta[];
 }
 
 export type ImportPlan =
@@ -22,12 +21,12 @@ export const FLAT_PLAYLIST_PRINT = '%(id)s\t%(title)s\t%(uploader)s\t%(playlist_
 
 const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 
-export function parseOembed(json: unknown): { title: string; author: string; thumbnailUrl: string } | null {
+export function parseOembed(json: unknown): { title: string; author: string } | null {
   if (typeof json !== 'object' || json === null) return null;
   const record = json as Record<string, unknown>;
   const title = asText(record.title);
   if (!title) return null;
-  return { title, author: asText(record.author_name), thumbnailUrl: asText(record.thumbnail_url) };
+  return { title, author: asText(record.author_name) };
 }
 
 /** Import saves the bare video id as the title when oEmbed fails (private or removed videos). */
@@ -57,10 +56,10 @@ export function buildMusicFrontmatter(
 ): Record<string, string> {
   const frontmatter: Record<string, string> = {
     type: mapping.musicNoteType,
-    [mapping.musicUrlProperty]: buildYoutubeWatchUrl(meta.videoId),
   };
-  if (meta.author) frontmatter[mapping.musicArtistProperty] = meta.author;
-  if (meta.thumbnailUrl) frontmatter[mapping.musicThumbnailProperty] = meta.thumbnailUrl;
+  if (mapping.musicUrlProperty.trim()) frontmatter[mapping.musicUrlProperty] = buildYoutubeWatchUrl(meta.videoId);
+  if (mapping.musicArtistProperty.trim() && meta.author) frontmatter[mapping.musicArtistProperty] = meta.author;
+  if (mapping.musicThumbnailProperty.trim()) frontmatter[mapping.musicThumbnailProperty] = buildYoutubeThumbnailUrl(meta.videoId);
   return frontmatter;
 }
 

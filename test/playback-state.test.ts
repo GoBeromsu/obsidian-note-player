@@ -12,7 +12,6 @@ function makeTrack(path: string): MusicTrack {
 		watchUrl: '',
 		videoId: '',
 		thumbnailUrl: '',
-		imageUrl: '',
 		tags: [],
 	};
 }

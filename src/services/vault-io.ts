@@ -103,6 +103,10 @@ export function collectNoteSnapshots(app: App, folders: string[]): MarkdownNoteS
 	return collectMusicFiles(app, folders).map((file) => ({
 		path: file.path,
 		basename: file.basename,
+		ctime: file.stat.ctime,
+		mtime: file.stat.mtime,
+		frontmatterLinks: {},
+		embeddedBases: [],
 		frontmatter: app.metadataCache.getFileCache(file)?.frontmatter,
 	}));
 }

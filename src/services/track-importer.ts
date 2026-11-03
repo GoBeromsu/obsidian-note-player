@@ -11,7 +11,7 @@ import { sanitizeFileName } from '../utils/dedupe';
 import { parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
 import { retryUntil } from '../utils/retry';
 import { withTimeout } from '../utils/timeout';
-import { buildYoutubeThumbnailUrl, buildYoutubeWatchUrl, parseYoutubeUrl } from '../utils/youtube';
+import { buildYoutubeWatchUrl, parseYoutubeUrl } from '../utils/youtube';
 import { showNotice } from '../ui/notices';
 import { ensureFolder, getAvailablePath, waitForMetadata } from './vault-io';
 
@@ -160,11 +160,12 @@ export class TrackImporter {
   }
 
   private async writeMeta(file: TFile, meta: { title: string; author: string }, withTitle: boolean): Promise<void> {
-    if (!withTitle && !meta.author) return;
     const artistProperty = this.deps.getSettings().musicArtistProperty;
+    const writeArtist = artistProperty.trim() !== '' && meta.author !== '';
+    if (!withTitle && !writeArtist) return;
     await this.deps.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
       if (withTitle) frontmatter.title = meta.title;
-      if (meta.author) frontmatter[artistProperty] = meta.author;
+      if (writeArtist) frontmatter[artistProperty] = meta.author;
     });
   }
 
@@ -247,7 +248,7 @@ export class TrackImporter {
         paths.push(plan.path);
         continue;
       }
-      lastCreated = await this.createTrackNote({ ...entry, thumbnailUrl: entry.title === entry.videoId ? '' : buildYoutubeThumbnailUrl(entry.videoId) });
+      lastCreated = await this.createTrackNote(entry);
       known.push({ path: lastCreated.path, videoId: entry.videoId });
       paths.push(lastCreated.path);
     }
@@ -267,7 +268,6 @@ export class TrackImporter {
       videoId,
       title: videoId,
       author: '',
-      thumbnailUrl: '',
     };
     const watchUrl = buildYoutubeWatchUrl(videoId);
     // A slow or unreachable oEmbed must not hold up the import; the bare id stands in as the title until yt-dlp heals it.
@@ -279,7 +279,7 @@ export class TrackImporter {
       OEMBED_TIMEOUT_MS,
       null,
     ), 2, OEMBED_RETRY_DELAY_MS);
-    return oembed ? { videoId, ...oembed, thumbnailUrl: oembed.thumbnailUrl || buildYoutubeThumbnailUrl(videoId) } : fallback;
+    return oembed ? { videoId, ...oembed } : fallback;
   }
 
   private async createTrackNote(meta: TrackMeta): Promise<TFile> {

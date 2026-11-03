@@ -480,7 +480,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   private async refreshIndex(): Promise<void> {
     this.errorMessage = null;
     try {
-      this.library = buildMusicLibrary(collectNoteSnapshots(this.app, [this.settings.musicFolder, this.settings.playlistFolder]), this.settings);
+      this.library = buildMusicLibrary(collectNoteSnapshots(this.app, [this.settings.musicFolder, this.settings.playlistFolder]), this.settings, new Map());
 
       const selected = resolveSelectedPlaylistPath(this.settings.lastPlaylistPath, this.library.playlists);
       if (this.library.playlists.length > 0 && selected !== this.settings.lastPlaylistPath) {
@@ -510,10 +510,9 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const run = this.playlistEdits.then(async () => {
       const playlist = getPlaylistOrThrow(playlistPath, this.library.playlists);
       const trackPaths = edit(playlist.trackPaths);
-      const missing = new Set(playlist.missingTrackPaths);
       const isOwned = (entry: string) => {
         const reference = parsePlaylistTrackReference(entry);
-        return reference !== null && !missing.has(reference.normalized);
+        return reference !== null;
       };
       await updateFrontmatter(this.app, playlistPath, (frontmatter) => {
         const property = getLegacyPlaylistTrackProperty(this.settings);
