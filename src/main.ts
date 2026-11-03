@@ -34,6 +34,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   settings: NotePlayerSettings = DEFAULT_SETTINGS;
 
   private library: MusicLibrarySnapshot = EMPTY_LIBRARY;
+  private refreshGeneration = 0;
   private changeListeners = new Set<() => void>();
   private readonly scheduleRefresh = debounce(() => { void this.refreshIndex(); }, 250, true);
   private readonly playback = new PlaybackStateManager();
@@ -454,10 +455,12 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   // Keep the existing view visible while paired base configs load.
   private async refreshIndex(): Promise<void> {
+    const generation = ++this.refreshGeneration;
     this.errorMessage = null;
     try {
       const notes = collectNoteSnapshots(this.app, [this.settings.musicFolder, this.settings.playlistFolder], this.settings);
       const baseConfigs = await collectBaseConfigs(this.app, notes, this.settings.playlistNoteType);
+      if (generation !== this.refreshGeneration) return;
       this.library = buildMusicLibrary(notes, this.settings, baseConfigs);
 
       const selected = resolveSelectedPlaylistPath(this.settings.lastPlaylistPath, this.library.playlists);
@@ -472,10 +475,11 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       this.playback.validateCurrent(this.library.tracks);
 
     } catch (error) {
+      if (generation !== this.refreshGeneration) return;
       this.errorMessage = error instanceof Error ? error.message : String(error);
       console.error('[Note Player] Failed to refresh library', error);
     } finally {
-      this.notifyChange();
+      if (generation === this.refreshGeneration) this.notifyChange();
     }
   }
 
