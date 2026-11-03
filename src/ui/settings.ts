@@ -128,7 +128,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 					this.folderRow('Playlist folder', 'Playlists are read from this folder and its subfolders, and new playlists are created here.', 'playlistFolder'),
 					this.folderRow(
 						'Music folder',
-						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root reads only the notes at the top level of the vault.',
+						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root includes all folders in the vault.',
 						'musicFolder',
 					),
 				],

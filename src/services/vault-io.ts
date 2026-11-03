@@ -128,7 +128,7 @@ export async function writeBaseFiles(app: App, baseFiles: CompanionBaseFile[]): 
 
 const isMarkdown = (file: unknown): file is TFile => file instanceof TFile && file.extension === 'md';
 
-/** Root scope is shallow; backlink members are included without scanning the vault. */
+/** Selected folders include all descendants; backlink members can also come from outside that scope. */
 export function collectMusicFiles(app: App, folders: string[], playlistNoteType?: string): TFile[] {
 	const roots = folders
 		.map((path) => path === VAULT_ROOT ? app.vault.getRoot() : app.vault.getFolderByPath(normalizePath(path)))

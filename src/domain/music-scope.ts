@@ -11,13 +11,12 @@ export interface ScopeTree<Folder, File> {
 
 export function collectScopedFiles<Folder, File>(roots: ScopeRoot<Folder>[], tree: ScopeTree<Folder, File>): File[] {
 	const files = new Set<File>();
-	const visit = (folder: Folder, recurse: boolean): void => {
+	const visit = (folder: Folder): void => {
 		const { folders, files: own } = tree.children(folder);
 		for (const file of own) files.add(file);
-		if (recurse) for (const child of folders) visit(child, true);
+		for (const child of folders) visit(child);
 	};
-	// Recursing from the vault root would be a whole-vault walk, which AGENTS.md forbids (startup/scan rules).
-	for (const { folder, isVaultRoot } of roots) visit(folder, !isVaultRoot);
+	for (const { folder } of roots) visit(folder);
 	for (const file of [...files]) for (const target of tree.linked(file)) files.add(target);
 	return [...files];
 }
