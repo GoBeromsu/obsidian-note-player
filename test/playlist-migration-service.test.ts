@@ -17,6 +17,8 @@ vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
 			preview.finish = finish;
 		}
 		open() { preview.opened(); }
+		showProgress() {}
+		close() {}
 	},
 }));
 
@@ -152,6 +154,34 @@ describe('playlist migration service', () => {
 		expect(duplicate).toBe(done);
 		expect(await readNote(host.app, 'Playlists/Mix.md')).toBe(before);
 		expect(host.app.vault.getAllLoadedFiles().map((file) => file.path)).toEqual(['Playlists/Mix.md', 'Tracks/A.md']);
+	});
+
+	it('joins overlapping invocations until conversion writes have finished', async () => {
+		const host = await fixture();
+		let entered: () => void = () => {};
+		let release: () => void = () => {};
+		const writeStarted = new Promise<void>((resolve) => { entered = resolve; });
+		const writeGate = new Promise<void>((resolve) => { release = resolve; });
+		const write = host.app.fileManager.processFrontMatter.bind(host.app.fileManager);
+		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementationOnce(async (file, edit) => {
+			entered();
+			await writeGate;
+			await write(file, edit);
+		});
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await writeStarted;
+		try {
+			expect(convertPlaylistNotes(host)).toBe(done);
+		} finally {
+			release();
+			await done;
+		}
+
+		expect(await readNote(host.app, 'Tracks/A.md')).toContain(
+			'"playlists":["[[Other]]","[[Playlists/Mix]]"]',
+		);
 	});
 
 	it('skips conflicts and invalid notes without forgetting their configured legacy key', async () => {

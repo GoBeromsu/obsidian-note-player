@@ -103,13 +103,24 @@ async function previewMigration(host: MigrationHost): Promise<void> {
 		showNotice('migration_already_bases');
 		return;
 	}
-	const confirmed = await new Promise<boolean>((resolve) => {
-		new MigrationPreviewModal(host.app, plan, resolve).open();
-	});
-	if (confirmed) await applyMigration(host, plan);
+	let confirm: (confirmed: boolean) => void = () => {};
+	const confirmation = new Promise<boolean>((resolve) => { confirm = resolve; });
+	const modal = new MigrationPreviewModal(host.app, plan, confirm);
+	modal.open();
+	if (await confirmation) {
+		try {
+			await applyMigration(host, plan, (current, total, path, state) => modal.showProgress(current, total, path, state));
+		} finally {
+			modal.close();
+		}
+	}
 }
 
-async function applyMigration(host: MigrationHost, preview: PlaylistMigrationPlan): Promise<void> {
+async function applyMigration(
+	host: MigrationHost,
+	preview: PlaylistMigrationPlan,
+	reportProgress: (current: number, total: number, path: string, state: 'converting' | 'converted' | 'failed') => void,
+): Promise<void> {
 	const { app, settings } = host;
 	const progress = new Notice('', 0);
 	let converted = 0;
@@ -117,7 +128,9 @@ async function applyMigration(host: MigrationHost, preview: PlaylistMigrationPla
 	let missing = 0;
 	const errors: string[] = [];
 	try {
-		for (const playlist of preview.playlists.filter(needsConversion)) {
+		const playlists = preview.playlists.filter(needsConversion);
+		for (const [index, playlist] of playlists.entries()) {
+			reportProgress(index + 1, playlists.length, playlist.notePath, 'converting');
 			progress.setMessage(renderNotice(NOTICE_CATALOG.migration_progress.template, { name: playlist.notePath }));
 			try {
 				const current = await collectPlan(host);
@@ -168,7 +181,9 @@ async function applyMigration(host: MigrationHost, preview: PlaylistMigrationPla
 				}
 				converted++;
 				missing += playlist.missing.length;
+				reportProgress(index + 1, playlists.length, playlist.notePath, 'converted');
 			} catch (error: unknown) {
+				reportProgress(index + 1, playlists.length, playlist.notePath, 'failed');
 				const reason = error instanceof Error ? error.message : String(error);
 				errors.push(`${playlist.notePath}: ${reason}`);
 				showNotice('migration_failed', { name: playlist.notePath, reason });
