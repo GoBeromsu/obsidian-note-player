@@ -78,6 +78,24 @@ describe('buildMusicLibrary', () => {
     expect(buildMusicLibrary(notes).tracks).toHaveLength(0);
   });
 
+  it('does not read a URL from a different property', () => {
+    const notes = [{
+      path: 'Music/Track.md',
+      basename: 'Track',
+      frontmatter: { type: 'music', youtube: 'https://www.youtube.com/watch?v=DEyzYWLvXqA' },
+    }];
+    expect(buildMusicLibrary(notes).tracks).toEqual([]);
+  });
+
+  it('leaves the artist empty when only another artist property has a value', () => {
+    const notes = [{
+      path: 'Music/Track.md',
+      basename: 'Track',
+      frontmatter: { type: 'music', source: 'https://www.youtube.com/watch?v=DEyzYWLvXqA', artist: 'Other artist' },
+    }];
+    expect(buildMusicLibrary(notes).tracks[0]?.artist).toBe('');
+  });
+
   it('supports custom property mapping for music and playlist notes', () => {
     const notes: MarkdownNoteSnapshot[] = [
       {
@@ -103,10 +121,11 @@ describe('buildMusicLibrary', () => {
     ];
 
     const snapshot = buildMusicLibrary(notes, {
-      musicUrlProperties: ['clip_url'],
-      musicThumbnailProperties: ['poster'],
-      musicArtistProperties: ['performer'],
-      playlistTrackProperty: 'entries',
+      musicUrlProperty: 'clip_url',
+      musicThumbnailProperty: 'poster',
+      musicArtistProperty: 'performer',
+      playlistMembershipProperty: 'playlists',
+      legacyPlaylistTrackProperty: 'entries',
       playlistDescriptionProperty: 'summary',
       playlistCoverProperty: 'artwork',
       musicNoteType: 'music',

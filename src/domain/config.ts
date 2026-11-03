@@ -1,17 +1,19 @@
 import type { NotePlayerSettings, YoutubePlaylistPropertyMapping } from '../types/settings';
-import { dedupe } from '../utils/dedupe';
 import { DEFAULT_VOLUME, normalizeVolume } from './volume';
 
-export const DEFAULT_PROPERTY_MAPPING: YoutubePlaylistPropertyMapping = {
-  musicUrlProperties: ['source', 'youtube', 'youtube_url', 'url'],
-  musicThumbnailProperties: ['image', 'thumbnail', 'cover'],
-  musicArtistProperties: ['author', 'artist'],
-  playlistTrackProperty: 'tracks',
+export const LEGACY_TRACKS_KEY = 'tracks';
+export const VAULT_ROOT = '/';
+
+export const DEFAULT_PROPERTY_MAPPING = {
+  musicUrlProperty: 'source',
+  musicThumbnailProperty: 'image',
+  musicArtistProperty: 'author',
+  playlistMembershipProperty: 'playlists',
   playlistDescriptionProperty: 'description',
   playlistCoverProperty: 'cover',
   musicNoteType: 'music',
   playlistNoteType: 'music-playlist',
-};
+} satisfies YoutubePlaylistPropertyMapping;
 
 export const DEFAULT_SETTINGS: NotePlayerSettings = {
   ...DEFAULT_PROPERTY_MAPPING,
@@ -28,58 +30,80 @@ export const DEFAULT_SETTINGS: NotePlayerSettings = {
   volumeMuted: DEFAULT_VOLUME.muted,
 };
 
-export function normalizePropertyList(values: string[], fallback: string[]): string[] {
-  const normalized = values
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  return normalized.length > 0 ? dedupe(normalized) : [...fallback];
-}
-
-export function normalizePropertyName(value: string, fallback: string): string {
-  const normalized = value.trim();
+function normalizePropertyName(value: unknown, fallback: string): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
   return normalized.length > 0 ? normalized : fallback;
 }
 
-export function normalizeSettings(loaded: NotePlayerSettings): NotePlayerSettings {
+type MappingKey = keyof typeof DEFAULT_PROPERTY_MAPPING;
+type LegacyKey = 'musicUrlProperties' | 'musicThumbnailProperties' | 'musicArtistProperties' | 'playlistTrackProperty';
+type SavedSettings = Partial<Omit<NotePlayerSettings, keyof YoutubePlaylistPropertyMapping>>
+  & Partial<Record<keyof YoutubePlaylistPropertyMapping | LegacyKey, unknown>>;
+
+function isMappingKey(key: string): key is MappingKey {
+  return Object.hasOwn(DEFAULT_PROPERTY_MAPPING, key);
+}
+
+export function normalizeSettingValue(key: string, value: unknown): unknown {
+  return isMappingKey(key)
+    ? normalizePropertyName(value, DEFAULT_PROPERTY_MAPPING[key])
+    : typeof value === 'string' ? value.trim() : value;
+}
+
+function migrateProperty(loaded: SavedSettings, key: MappingKey, legacy: unknown): string {
+  const values: readonly unknown[] = Array.isArray(legacy) ? legacy : [];
+  const value = Object.hasOwn(loaded, key) ? loaded[key]
+    : values.find((entry) => typeof entry === 'string' && entry.trim());
+  return normalizePropertyName(value, DEFAULT_PROPERTY_MAPPING[key]);
+}
+
+/** Temporary track-list access until playlist storage moves to membership links. */
+export function getLegacyPlaylistTrackProperty(mapping: YoutubePlaylistPropertyMapping): string {
+  return normalizePropertyName(mapping.legacyPlaylistTrackProperty, LEGACY_TRACKS_KEY);
+}
+
+export function normalizeSettings(loaded: SavedSettings = {}): NotePlayerSettings {
+  const {
+    musicUrlProperties, musicThumbnailProperties, musicArtistProperties, playlistTrackProperty,
+    legacyPlaylistTrackProperty, ...settings
+  } = loaded;
+  const legacy = ['musicUrlProperties', 'musicThumbnailProperties', 'musicArtistProperties', 'playlistTrackProperty']
+    .some((key) => Object.hasOwn(loaded, key));
   const volume = normalizeVolume(loaded.volume, loaded.volumeMuted);
   return {
-    ...loaded,
+    ...DEFAULT_SETTINGS,
+    ...settings,
     volume: volume.level,
     volumeMuted: volume.muted,
     turntableStyle: loaded.turntableStyle === 'minimal' ? 'minimal' : 'realistic',
-    musicUrlProperties: normalizePropertyList(
-      loaded.musicUrlProperties ?? [],
-      DEFAULT_PROPERTY_MAPPING.musicUrlProperties,
-    ),
-    musicThumbnailProperties: normalizePropertyList(
-      loaded.musicThumbnailProperties ?? [],
-      DEFAULT_PROPERTY_MAPPING.musicThumbnailProperties,
-    ),
-    musicArtistProperties: normalizePropertyList(
-      loaded.musicArtistProperties ?? [],
-      DEFAULT_PROPERTY_MAPPING.musicArtistProperties,
-    ),
-    playlistTrackProperty: normalizePropertyName(
-      loaded.playlistTrackProperty ?? '',
-      DEFAULT_PROPERTY_MAPPING.playlistTrackProperty,
+    musicUrlProperty: migrateProperty(loaded, 'musicUrlProperty', musicUrlProperties),
+    musicThumbnailProperty: migrateProperty(loaded, 'musicThumbnailProperty', musicThumbnailProperties),
+    musicArtistProperty: migrateProperty(loaded, 'musicArtistProperty', musicArtistProperties),
+    playlistMembershipProperty: normalizePropertyName(
+      loaded.playlistMembershipProperty,
+      DEFAULT_PROPERTY_MAPPING.playlistMembershipProperty,
     ),
     playlistDescriptionProperty: normalizePropertyName(
-      loaded.playlistDescriptionProperty ?? '',
+      loaded.playlistDescriptionProperty,
       DEFAULT_PROPERTY_MAPPING.playlistDescriptionProperty,
     ),
     playlistCoverProperty: normalizePropertyName(
-      loaded.playlistCoverProperty ?? '',
+      loaded.playlistCoverProperty,
       DEFAULT_PROPERTY_MAPPING.playlistCoverProperty,
     ),
     musicNoteType: normalizePropertyName(
-      loaded.musicNoteType ?? '',
+      loaded.musicNoteType,
       DEFAULT_PROPERTY_MAPPING.musicNoteType,
     ),
     playlistNoteType: normalizePropertyName(
-      loaded.playlistNoteType ?? '',
+      loaded.playlistNoteType,
       DEFAULT_PROPERTY_MAPPING.playlistNoteType,
     ),
+    ...(legacy || legacyPlaylistTrackProperty !== undefined ? {
+      legacyPlaylistTrackProperty: normalizePropertyName(
+        legacyPlaylistTrackProperty ?? playlistTrackProperty, LEGACY_TRACKS_KEY,
+      ),
+    } : {}),
   };
 }
 

@@ -9,10 +9,11 @@ describe('companion base files', () => {
 
   it('builds deterministic base files from configured property mapping', () => {
     const files = buildCompanionBaseFiles('90. System/Playlists', {
-      musicUrlProperties: ['clip_url', 'source'],
-      musicThumbnailProperties: ['poster'],
-      musicArtistProperties: ['performer'],
-      playlistTrackProperty: 'entries',
+      musicUrlProperty: 'clip_url',
+      musicThumbnailProperty: 'poster',
+      musicArtistProperty: 'performer',
+      playlistMembershipProperty: 'playlists',
+      legacyPlaylistTrackProperty: 'entries',
       playlistDescriptionProperty: 'summary',
       playlistCoverProperty: 'artwork',
       musicNoteType: 'music',

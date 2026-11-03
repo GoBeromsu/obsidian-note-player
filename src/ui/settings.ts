@@ -7,9 +7,8 @@ import {
 	type Setting,
 	type SettingDefinitionItem,
 } from 'obsidian';
-import { DEFAULT_PROPERTY_MAPPING } from '../domain/config';
+import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/config';
 import { collectMusicFiles } from '../services/vault-io';
-import { parsePropertyList } from '../utils/property-list';
 import type { AudioFormat } from '../types/audio';
 import type { NotePlayerSettings, TurntableStyle } from '../types/settings';
 
@@ -20,16 +19,6 @@ interface SettingsHost extends Plugin {
 	refreshCompanionBases(): Promise<void>;
 }
 
-type ListKey = 'musicUrlProperties' | 'musicThumbnailProperties' | 'musicArtistProperties';
-type TextKey =
-	| 'playlistFolder'
-	| 'playlistTrackProperty'
-	| 'playlistDescriptionProperty'
-	| 'playlistCoverProperty'
-	| 'musicNoteType'
-	| 'playlistNoteType';
-
-const LIST_KEYS: readonly string[] = ['musicUrlProperties', 'musicThumbnailProperties', 'musicArtistProperties'];
 const NO_REFRESH_KEYS: readonly string[] = ['audioFormat', 'autoOpenOnStartup', 'musicFolder', 'turntableSounds'];
 const TURNTABLE_STYLE_OPTIONS: Record<TurntableStyle, string> = { realistic: 'Realistic', minimal: 'Minimal' };
 const AUDIO_FORMAT_OPTIONS: Record<AudioFormat, string> = { mp3: 'MP3', wav: 'WAV', opus: 'OPUS', aac: 'AAC' };
@@ -51,14 +40,13 @@ class PropertySuggest extends AbstractInputSuggest<string> {
 	constructor(
 		app: App,
 		private readonly inputEl: HTMLInputElement,
-		private readonly list: boolean,
 		private readonly getMusicFolder: () => string,
 	) {
 		super(app, inputEl);
 	}
 
 	getSuggestions(query: string): string[] {
-		const token = (this.list ? query.split(',').pop() ?? '' : query).trim().toLowerCase();
+		const token = query.trim().toLowerCase();
 		return collectVaultProperties(this.app, this.getMusicFolder()).filter((p) => p.toLowerCase().includes(token));
 	}
 
@@ -67,13 +55,7 @@ class PropertySuggest extends AbstractInputSuggest<string> {
 	}
 
 	selectSuggestion(value: string): void {
-		if (this.list) {
-			const parts = this.inputEl.value.split(',');
-			parts[parts.length - 1] = ' ' + value;
-			this.inputEl.value = parts.join(',').replace(/^,\s*/, '');
-		} else {
-			this.inputEl.value = value;
-		}
+		this.inputEl.value = value;
 		this.inputEl.dispatchEvent(new Event('input'));
 		this.close();
 	}
@@ -89,12 +71,11 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	}
 
 	getControlValue(key: string): unknown {
-		const value: unknown = this.host.settings[key as keyof NotePlayerSettings];
-		return LIST_KEYS.includes(key) && Array.isArray(value) ? value.join(', ') : value;
+		return this.host.settings[key as keyof NotePlayerSettings];
 	}
 
 	setControlValue(key: string, value: unknown): void {
-		const next = LIST_KEYS.includes(key) ? parsePropertyList(String(value)) : typeof value === 'string' ? value.trim() : value;
+		const next = normalizeSettingValue(key, value);
 		Object.assign(this.host.settings, { [key]: next });
 		this.refreshPending ||= !NO_REFRESH_KEYS.includes(key);
 		this.persist();
@@ -166,16 +147,16 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'Music note mapping',
 				items: [
-					this.propertyRow('URL properties', 'Comma-separated priority order for the YouTube URL property.', 'musicUrlProperties'),
-					this.propertyRow('Thumbnail properties', 'Comma-separated priority order for music-note artwork lookup.', 'musicThumbnailProperties'),
-					this.propertyRow('Artist properties', 'Comma-separated priority order for artist or author metadata.', 'musicArtistProperties'),
+					this.propertyRow('URL property', 'Frontmatter key used for the YouTube URL.', 'musicUrlProperty'),
+					this.propertyRow('Thumbnail property', 'Frontmatter key used for music-note artwork.', 'musicThumbnailProperty'),
+					this.propertyRow('Artist property', 'Frontmatter key used for artist or author metadata.', 'musicArtistProperty'),
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Playlist note schema',
 				items: [
-					this.propertyRow('Track list property', 'Frontmatter key that stores the ordered track links for each playlist note.', 'playlistTrackProperty'),
+					this.propertyRow('Membership property', 'Frontmatter key for playlist membership links.', 'playlistMembershipProperty'),
 					this.propertyRow('Description property', 'Frontmatter key used for playlist description text.', 'playlistDescriptionProperty'),
 					this.propertyRow('Cover property', 'Frontmatter key used for playlist cover artwork.', 'playlistCoverProperty'),
 					{
@@ -196,7 +177,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Companion Bases files',
-						desc: 'Rewrite music.base and playlists.base beside your playlist folder to match the current mapping. The first property of each music-note mapping list becomes its bases column.',
+						desc: 'Rewrite music.base and playlists.base beside your playlist folder to match the current mapping.',
 						render: (setting) => {
 							setting.addButton((button) =>
 								button.setButtonText('Refresh').onClick(() => {
@@ -210,9 +191,8 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 		];
 	}
 
-	private propertyRow(name: string, desc: string, key: ListKey | TextKey) {
-		const list = LIST_KEYS.includes(key);
-		const placeholder = list ? DEFAULT_PROPERTY_MAPPING[key as ListKey].join(', ') : DEFAULT_PROPERTY_MAPPING[key as keyof typeof DEFAULT_PROPERTY_MAPPING];
+	private propertyRow(name: string, desc: string, key: keyof typeof DEFAULT_PROPERTY_MAPPING) {
+		const placeholder = DEFAULT_PROPERTY_MAPPING[key];
 		return {
 			name,
 			desc,
@@ -222,7 +202,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						.setPlaceholder(String(placeholder))
 						.setValue(String(this.getControlValue(key)))
 						.onChange((value) => { void this.setControlValue(key, value); });
-					new PropertySuggest(this.app, text.inputEl, list, () => this.host.settings.musicFolder);
+					new PropertySuggest(this.app, text.inputEl, () => this.host.settings.musicFolder);
 				});
 			},
 		};

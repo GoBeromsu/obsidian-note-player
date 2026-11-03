@@ -30,7 +30,7 @@ describe('trackLabel', () => {
 describe('buildMusicFrontmatter', () => {
   const meta = { videoId: 'Zs3CIgFET_Y', title: 'Song', author: 'Band', thumbnailUrl: 'https://i/x.jpg' };
 
-  it('uses the first configured keys and the note type', () => {
+  it('uses the configured keys and the note type', () => {
     expect(buildMusicFrontmatter(meta, DEFAULT_PROPERTY_MAPPING)).toEqual({
       type: 'music',
       source: 'https://www.youtube.com/watch?v=Zs3CIgFET_Y',
@@ -44,7 +44,7 @@ describe('buildMusicFrontmatter', () => {
   });
 
   it('honours custom mapping and omits an empty author', () => {
-    const mapping = { ...DEFAULT_PROPERTY_MAPPING, musicNoteType: 'song', musicUrlProperties: ['yt'] };
+    const mapping = { ...DEFAULT_PROPERTY_MAPPING, musicNoteType: 'song', musicUrlProperty: 'yt' };
     expect(buildMusicFrontmatter({ ...meta, author: '' }, mapping)).toEqual({
       type: 'song',
       yt: 'https://www.youtube.com/watch?v=Zs3CIgFET_Y',

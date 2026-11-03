@@ -1,7 +1,7 @@
 import { debounce, Plugin, WorkspaceLeaf } from 'obsidian';
 import { plural } from './utils/plural';
 import { MUSIC_BASE_NAME, PLAYLISTS_BASE_NAME } from './domain/base-files';
-import { DEFAULT_SETTINGS, normalizeSettings } from './domain/config';
+import { DEFAULT_SETTINGS, getLegacyPlaylistTrackProperty, normalizeSettings } from './domain/config';
 import { buildMusicLibrary } from './domain/library-index';
 import { isUnavailable, trackLabel } from './domain/track-import';
 import { PlaybackStateManager } from './domain/playback-state';
@@ -144,8 +144,8 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   }
 
   async loadSettings(): Promise<void> {
-    const loaded = { ...DEFAULT_SETTINGS, ...(await this.loadData() as Partial<NotePlayerSettings>) };
-    this.settings = normalizeSettings(loaded);
+    const loaded = await this.loadData() as Parameters<typeof normalizeSettings>[0] | null;
+    this.settings = normalizeSettings(loaded ?? {});
   }
 
   async saveSettings(): Promise<void> {
@@ -516,7 +516,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
         return reference !== null && !missing.has(reference.normalized);
       };
       await updateFrontmatter(this.app, playlistPath, (frontmatter) => {
-        const property = this.settings.playlistTrackProperty;
+        const property = getLegacyPlaylistTrackProperty(this.settings);
         const existing: unknown = frontmatter[property];
         frontmatter[property] = mergeTrackEntries(Array.isArray(existing) ? existing : [], trackPaths, isOwned);
       });

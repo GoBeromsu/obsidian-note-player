@@ -1,5 +1,5 @@
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
-import { DEFAULT_PROPERTY_MAPPING } from './config';
+import { DEFAULT_PROPERTY_MAPPING, getLegacyPlaylistTrackProperty } from './config';
 
 export const MUSIC_BASE_NAME = 'Music.base';
 export const PLAYLISTS_BASE_NAME = 'Playlists.base';
@@ -41,12 +41,9 @@ export function getCompanionBaseFolder(playlistFolder: string): string {
 }
 
 function createMusicBaseContent(propertyMapping: YoutubePlaylistPropertyMapping): string {
-	const artistProperty = firstProperty(propertyMapping.musicArtistProperties, DEFAULT_PROPERTY_MAPPING.musicArtistProperties[0]!);
-	const thumbnailProperty = firstProperty(
-		propertyMapping.musicThumbnailProperties,
-		DEFAULT_PROPERTY_MAPPING.musicThumbnailProperties[0]!,
-  );
-  const urlProperty = firstProperty(propertyMapping.musicUrlProperties, DEFAULT_PROPERTY_MAPPING.musicUrlProperties[0]!);
+	const artistProperty = propertyMapping.musicArtistProperty;
+	const thumbnailProperty = propertyMapping.musicThumbnailProperty;
+  const urlProperty = propertyMapping.musicUrlProperty;
 
 	return [
 		'filters:',
@@ -80,10 +77,9 @@ function createMusicBaseContent(propertyMapping: YoutubePlaylistPropertyMapping)
 }
 
 function createPlaylistBaseContent(propertyMapping: YoutubePlaylistPropertyMapping): string {
-	const trackProperty = propertyMapping.playlistTrackProperty || DEFAULT_PROPERTY_MAPPING.playlistTrackProperty;
-	const descriptionProperty =
-		propertyMapping.playlistDescriptionProperty || DEFAULT_PROPERTY_MAPPING.playlistDescriptionProperty;
-	const coverProperty = propertyMapping.playlistCoverProperty || DEFAULT_PROPERTY_MAPPING.playlistCoverProperty;
+	const trackProperty = getLegacyPlaylistTrackProperty(propertyMapping);
+	const descriptionProperty = propertyMapping.playlistDescriptionProperty;
+	const coverProperty = propertyMapping.playlistCoverProperty;
 	const trackCountFormula = buildTrackCountFormula(trackProperty);
 
 	return [
@@ -120,10 +116,6 @@ function createPlaylistBaseContent(propertyMapping: YoutubePlaylistPropertyMappi
 		'    displayName: "Count"',
 		'',
 	].join('\n');
-}
-
-function firstProperty(values: string[], fallback: string): string {
-  return values.find((value) => value.trim().length > 0) ?? fallback;
 }
 
 function joinVaultPath(folder: string, fileName: string): string {

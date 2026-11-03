@@ -5,7 +5,7 @@ import { dedupe } from '../utils/dedupe';
 import { hasType, asStringArray, asTrimmedString } from '../utils/frontmatter';
 import { buildYoutubeThumbnailUrl, buildYoutubeWatchUrl, extractYoutubeVideoId } from '../utils/youtube';
 import { canonicalizeNotePath, parsePlaylistTrackReference } from '../utils/wikilink';
-import { DEFAULT_PROPERTY_MAPPING } from './config';
+import { DEFAULT_PROPERTY_MAPPING, getLegacyPlaylistTrackProperty } from './config';
 import { isUnavailable } from './track-import';
 
 interface TrackResolver {
@@ -40,7 +40,7 @@ function toMusicTrack(
     return null;
   }
 
-  const sourceUrl = firstAvailableString(note.frontmatter, propertyMapping.musicUrlProperties);
+  const sourceUrl = asTrimmedString(note.frontmatter?.[propertyMapping.musicUrlProperty]);
   if (!sourceUrl) {
     return null;
   }
@@ -50,8 +50,8 @@ function toMusicTrack(
     return null;
   }
 
-  const imageUrl = firstAvailableString(note.frontmatter, propertyMapping.musicThumbnailProperties) ?? buildYoutubeThumbnailUrl(videoId);
-  const artist = firstAvailableString(note.frontmatter, propertyMapping.musicArtistProperties) ?? '';
+  const imageUrl = asTrimmedString(note.frontmatter?.[propertyMapping.musicThumbnailProperty]) ?? buildYoutubeThumbnailUrl(videoId);
+  const artist = asTrimmedString(note.frontmatter?.[propertyMapping.musicArtistProperty]) ?? '';
 
   return {
     path: note.path,
@@ -74,7 +74,7 @@ function toPlaylistNote(
   resolver: TrackResolver,
   propertyMapping: YoutubePlaylistPropertyMapping,
 ): PlaylistNote | null {
-  const rawTrackRefs = asStringArray(note.frontmatter?.[propertyMapping.playlistTrackProperty]);
+  const rawTrackRefs = asStringArray(note.frontmatter?.[getLegacyPlaylistTrackProperty(propertyMapping)]);
   const isPlaylist =
     hasType(note.frontmatter, propertyMapping.playlistNoteType) ||
     (hasType(note.frontmatter, 'playlist') && rawTrackRefs.length > 0);
@@ -106,8 +106,8 @@ function toPlaylistNote(
   return {
     path: note.path,
     title: note.basename,
-    coverUrl: firstAvailableString(note.frontmatter, [propertyMapping.playlistCoverProperty]) ?? '',
-    description: firstAvailableString(note.frontmatter, [propertyMapping.playlistDescriptionProperty]) ?? '',
+    coverUrl: asTrimmedString(note.frontmatter?.[propertyMapping.playlistCoverProperty]) ?? '',
+    description: asTrimmedString(note.frontmatter?.[propertyMapping.playlistDescriptionProperty]) ?? '',
     trackPaths: uniqueTrackPaths,
     tracks: uniqueTrackPaths
       .map((trackPath) => trackLookup.get(trackPath) ?? null)
@@ -147,23 +147,5 @@ function resolveTrackPath(reference: string, resolver: TrackResolver): string | 
 function getPathStem(path: string): string {
   const basename = path.split('/').pop() ?? path;
   return basename.toLowerCase().replace(/\.md$/i, '');
-}
-
-function firstAvailableString(
-  frontmatter: Record<string, unknown> | undefined,
-  keys: string[],
-): string | null {
-  if (!frontmatter) {
-    return null;
-  }
-
-  for (const key of keys) {
-    const value = asTrimmedString(frontmatter[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
 }
 

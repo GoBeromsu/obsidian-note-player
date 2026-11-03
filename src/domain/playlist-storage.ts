@@ -1,10 +1,8 @@
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
 import { canonicalizeNotePath, parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
-import { DEFAULT_PROPERTY_MAPPING } from './config';
+import { DEFAULT_PROPERTY_MAPPING, getLegacyPlaylistTrackProperty } from './config';
 
 const FRONTMATTER_PATTERN = /^---\n[\s\S]*?\n---\n*/;
-
-export const PLAYLIST_NOTE_TYPE = 'music-playlist';
 
 export interface PlaylistDocumentInput {
   trackPaths: string[];
@@ -30,10 +28,10 @@ export function updatePlaylistNoteContent(
   propertyMapping: YoutubePlaylistPropertyMapping = DEFAULT_PROPERTY_MAPPING,
 ): string {
   const body = stripFrontmatter(existingContent);
-  const noteType = propertyMapping.playlistNoteType ?? PLAYLIST_NOTE_TYPE;
+  const noteType = propertyMapping.playlistNoteType;
   const frontmatter = serializeFrontmatter({
     type: noteType,
-    [propertyMapping.playlistTrackProperty]: dedupeTrackPaths(input.trackPaths),
+    [getLegacyPlaylistTrackProperty(propertyMapping)]: dedupeTrackPaths(input.trackPaths),
     [propertyMapping.playlistCoverProperty]: input.coverUrl,
     [propertyMapping.playlistDescriptionProperty]: input.description,
   });

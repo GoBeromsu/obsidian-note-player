@@ -57,10 +57,10 @@ export function buildMusicFrontmatter(
 ): Record<string, string> {
   const frontmatter: Record<string, string> = {
     type: mapping.musicNoteType,
-    [mapping.musicUrlProperties[0] ?? 'source']: buildYoutubeWatchUrl(meta.videoId),
+    [mapping.musicUrlProperty]: buildYoutubeWatchUrl(meta.videoId),
   };
-  if (meta.author) frontmatter[mapping.musicArtistProperties[0] ?? 'author'] = meta.author;
-  if (meta.thumbnailUrl) frontmatter[mapping.musicThumbnailProperties[0] ?? 'image'] = meta.thumbnailUrl;
+  if (meta.author) frontmatter[mapping.musicArtistProperty] = meta.author;
+  if (meta.thumbnailUrl) frontmatter[mapping.musicThumbnailProperty] = meta.thumbnailUrl;
   return frontmatter;
 }
 

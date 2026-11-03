@@ -1,5 +1,6 @@
 import { MarkdownView, requestUrl, type App, type TFile } from 'obsidian';
 import { plural } from '../utils/plural';
+import { getLegacyPlaylistTrackProperty } from '../domain/config';
 import {
   buildMusicFrontmatter, classifyBacklinks, classifyImport, isUnavailable, parseFlatPlaylistOutput, parseOembed, trackLabel, type TrackMeta,
 } from '../domain/track-import';
@@ -160,7 +161,7 @@ export class TrackImporter {
 
   private async writeMeta(file: TFile, meta: { title: string; author: string }, withTitle: boolean): Promise<void> {
     if (!withTitle && !meta.author) return;
-    const artistProperty = this.deps.getSettings().musicArtistProperties[0] ?? 'author';
+    const artistProperty = this.deps.getSettings().musicArtistProperty;
     await this.deps.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
       if (withTitle) frontmatter.title = meta.title;
       if (meta.author) frontmatter[artistProperty] = meta.author;
@@ -183,7 +184,7 @@ export class TrackImporter {
   /** Playlist entries that resolve to `file`, keyed by playlist path, and whether any other note links to it. */
   private playlistsLinking(file: TFile): { playlists: Map<string, Set<string>>; elsewhere: boolean } {
     const { app } = this.deps;
-    const property = this.deps.getSettings().playlistTrackProperty;
+    const property = getLegacyPlaylistTrackProperty(this.deps.getSettings());
     const playlistPaths = new Set(this.deps.getLibrary().playlists.map((playlist) => playlist.path));
     const { playlistSources, elsewhere } = classifyBacklinks(app.metadataCache.resolvedLinks, file.path, playlistPaths);
     const playlists = new Map<string, Set<string>>();
@@ -200,7 +201,7 @@ export class TrackImporter {
 
   private async relink(playlists: Map<string, Set<string>>, file: TFile): Promise<void> {
     const { app } = this.deps;
-    const property = this.deps.getSettings().playlistTrackProperty;
+    const property = getLegacyPlaylistTrackProperty(this.deps.getSettings());
     for (const [path, entries] of playlists) {
       const playlist = app.vault.getFileByPath(path);
       if (!playlist) continue;
