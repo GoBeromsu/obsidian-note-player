@@ -15,6 +15,7 @@ import { ThumbnailCacheService } from './services/thumbnail-cache';
 import { openCompanionBase, writeCompanionBaseFiles } from './services/companion-bases';
 import { TrackImporter } from './services/track-importer';
 import { PlaylistService } from './services/playlist-service';
+import { convertPlaylistNotes } from './services/playlist-migration-service';
 import { openNoteInTab, collectNoteSnapshots, collectBaseConfigs } from './services/vault-io';
 import { registerCommands } from './ui/commands';
 import { showNotice } from './ui/notices';
@@ -135,6 +136,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       openView: () => this.activateView(),
       refreshLibrary: () => this.refresh(true),
       refreshBases: () => this.refreshCompanionBases(),
+      convertPlaylistNotes: () => convertPlaylistNotes(this),
       addActiveNote: () => this.addActiveNoteToSelectedPlaylist(),
       loadActivePlaylist: () => this.activateActivePlaylist(),
       addTrackFromUrl: (input) => this.addTrackFromUrl(input),

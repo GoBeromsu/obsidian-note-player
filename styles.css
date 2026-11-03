@@ -10,6 +10,38 @@
 	background: var(--background-primary);
 }
 
+/* Playlist migration preview */
+.onp-migration-modal {
+	width: min(640px, 90vw);
+}
+
+.onp-migration-modal .setting-item {
+	display: block;
+	padding-block: var(--size-4-4);
+}
+
+.onp-migration-modal .setting-item-name {
+	font-weight: var(--font-semibold);
+	overflow-wrap: anywhere;
+}
+
+.onp-migration-modal .setting-item-description {
+	line-height: var(--line-height-normal);
+	overflow-wrap: anywhere;
+	user-select: text;
+}
+
+.onp-migration-summary,
+.onp-migration-paths {
+	color: var(--text-muted);
+}
+
+.onp-migration-modal .onp-migration-actions .setting-item-control {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--size-4-2);
+}
+
 .onp-view-root:focus {
 	outline: none;
 }
