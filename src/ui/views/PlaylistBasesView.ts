@@ -69,7 +69,8 @@ export class PlaylistBasesView extends BasesView {
 			return;
 		}
 
-		const rows = buildPlaylistBasesRows(playlist, this.host.getState().currentTrack?.path ?? null);
+		const cache = this.host.getThumbnailCache?.();
+		const rows = buildPlaylistBasesRows(playlist, this.host.getState().currentTrack?.path ?? null, cache ? (id) => cache.resolve(id) : undefined);
 		const signature = playlistBasesSignature(playlist, rows);
 		if (signature === this.renderedSignature) {
 			this.syncCurrentRows(rows);

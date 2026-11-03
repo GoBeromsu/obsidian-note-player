@@ -30,6 +30,7 @@ class SettingsHostStub extends Plugin {
   saveSettings = vi.fn(() => Promise.resolve());
   refresh = vi.fn(() => Promise.resolve());
   refreshCompanionBases = vi.fn(() => Promise.resolve());
+  getThumbnailCache = vi.fn(() => null);
 }
 
 const defaults = {

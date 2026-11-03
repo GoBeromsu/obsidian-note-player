@@ -1,6 +1,7 @@
 import { requestUrl, type DataAdapter, type Plugin } from 'obsidian';
 import { THUMBNAIL_CACHE_FOLDER, thumbnailCachePath, ThumbnailQueue, videoIdFromCachePath } from '../domain/thumbnail-cache';
 import type { ThumbnailCachePort } from '../types/view';
+import { coalesce } from '../utils/coalesce';
 import { buildYoutubeThumbnailUrl } from '../utils/youtube';
 
 type ThumbnailAdapter = Pick<DataAdapter, 'exists' | 'list' | 'mkdir' | 'rmdir' | 'writeBinary' | 'getResourcePath'>;
@@ -26,17 +27,27 @@ export class ThumbnailCacheService implements ThumbnailCachePort {
 		(videoId, written) => {
 			if (!written) return;
 			this.remember(videoId);
-			this.emit();
+			this.emitSoon();
 		},
 	);
+	/** Downloads land in bursts; batch them into one re-render per tick (a frame in the app). */
+	private readonly emitSoon: () => void;
 	/** Swappable so QA can simulate an offline network. */
 	fetchImage: (url: string) => Promise<ArrayBuffer | null> = fetchThumbnail;
 
-	constructor(private readonly adapter: ThumbnailAdapter, private readonly cacheDir: string) {}
+	constructor(
+		private readonly adapter: ThumbnailAdapter,
+		private readonly cacheDir: string,
+		schedule: (callback: () => void) => void = queueMicrotask,
+	) {
+		this.emitSoon = coalesce(schedule, () => this.emit());
+	}
 
 	static attach(plugin: Plugin, onChange: () => void): ThumbnailCacheService {
 		const pluginDir = plugin.manifest.dir ?? `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}`;
-		const cache = new ThumbnailCacheService(plugin.app.vault.adapter, `${pluginDir}/${THUMBNAIL_CACHE_FOLDER}`);
+		const cache = new ThumbnailCacheService(plugin.app.vault.adapter, `${pluginDir}/${THUMBNAIL_CACHE_FOLDER}`, (callback) => {
+			window.requestAnimationFrame(callback);
+		});
 		plugin.register(cache.subscribe(onChange));
 		plugin.register(() => cache.dispose());
 		return cache;
@@ -114,7 +125,7 @@ export class ThumbnailCacheService implements ThumbnailCachePort {
 				const waiting = [...this.awaitingSeed];
 				this.awaitingSeed.clear();
 				for (const id of waiting) this.resolve(id);
-				if (waiting.some((id) => this.cached?.has(id))) this.emit();
+				if (waiting.some((id) => this.cached?.has(id))) this.emitSoon();
 			});
 	}
 

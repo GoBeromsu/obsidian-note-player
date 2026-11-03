@@ -13,6 +13,8 @@ import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/confi
 import { buildFolderOptions } from '../domain/settings-options';
 import type { AudioFormat } from '../types/audio';
 import type { NotePlayerSettings, TurntableStyle } from '../types/settings';
+import type { ThumbnailCachePort } from '../types/view';
+import { showNotice } from './notices';
 import { PropertySuggestModal, ValueSuggestModal } from './views/PropertySuggestModal';
 
 interface SettingsHost extends Plugin {
@@ -20,6 +22,7 @@ interface SettingsHost extends Plugin {
 	saveSettings(): Promise<void>;
 	refresh(showNotice?: boolean): Promise<void>;
 	refreshCompanionBases(): Promise<void>;
+	getThumbnailCache(): ThumbnailCachePort | null;
 }
 
 type MappingKey = keyof typeof DEFAULT_PROPERTY_MAPPING;
@@ -108,6 +111,13 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						desc: 'Open the playlist view automatically when Obsidian finishes loading.',
 						control: { type: 'toggle', key: 'autoOpenOnStartup' },
 					},
+					{
+						name: 'Thumbnail cache',
+						desc: 'Track thumbnails are saved in the plugin folder so they show instantly, even offline. Cleared thumbnails download again the next time they appear.',
+						render: (setting) => {
+							setting.addButton((button) => button.setButtonText('Clear').onClick(() => { void this.clearThumbnails(button); }));
+						},
+					},
 				],
 			},
 			{
@@ -160,6 +170,23 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				],
 			},
 		];
+	}
+
+	private async clearThumbnails(button: ButtonComponent): Promise<void> {
+		const cache = this.host.getThumbnailCache();
+		if (!cache) return;
+		button.setDisabled(true).setButtonText('Clearing…');
+		button.buttonEl.addClass('onp-is-busy');
+		try {
+			await cache.clear();
+			showNotice('thumbnail_cache_cleared');
+		} catch (error) {
+			console.error('[Note Player] Could not clear the thumbnail cache', error);
+			showNotice('thumbnail_cache_clear_failed');
+		} finally {
+			button.buttonEl.removeClass('onp-is-busy');
+			button.setDisabled(false).setButtonText('Clear');
+		}
 	}
 
 	// Rendered imperatively so the options are read from the vault on every display (Obsidian caches declarative

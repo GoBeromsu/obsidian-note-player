@@ -15,6 +15,8 @@ export const NOTICE_CATALOG = {
 	tracks_imported: { template: 'Added {{tracks}} to {{playlist}}.' },
 	action_succeeded: { template: '{{message}}' },
 	ytdlp_unavailable: { template: 'yt-dlp is not installed. Run brew install yt-dlp, then try again.' },
+	thumbnail_cache_cleared: { template: 'Thumbnail cache cleared.' },
+	thumbnail_cache_clear_failed: { template: "Couldn't clear the thumbnail cache. Try again." },
 } as const;
 
 export type NoticeId = keyof typeof NOTICE_CATALOG;
@@ -30,6 +32,7 @@ const SUCCESS_NOTICES: ReadonlySet<NoticeId> = new Set([
 	'track_removed',
 	'tracks_imported',
 	'action_succeeded',
+	'thumbnail_cache_cleared',
 ]);
 
 export function noticeDuration(id: NoticeId): number | undefined {
