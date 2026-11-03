@@ -1,4 +1,4 @@
-import { normalizePath, parseYaml, TFile, TFolder, type App, type CachedMetadata } from 'obsidian';
+import { normalizePath, parseYaml, TFile, TFolder, type App } from 'obsidian';
 import type { CompanionBaseFile } from '../domain/base-files';
 import { VAULT_ROOT } from '../domain/config';
 import { collectScopedFiles } from '../domain/music-scope';
@@ -21,16 +21,13 @@ export function getAvailablePath(app: App, folder: string, baseName: string): st
 	return normalizePath(`${folder}/${uniqueName(baseName, (name) => !!app.vault.getAbstractFileByPath(normalizePath(`${folder}/${name}.md`)))}.md`);
 }
 
-/** Resolves once the metadata cache has parsed a freshly written note, or after `timeoutMs`. */
+/** Waits for the initial cache entry of a newly created note. Edits use withMetadataSettled. */
 export function waitForMetadata(app: App, file: TFile, timeoutMs = 2000): Promise<void> {
 	if (app.metadataCache.getFileCache(file)?.frontmatter) return Promise.resolve();
-	return nextMetadataChange(app, file, { timeoutMs });
+	return nextMetadataChange(app, file, timeoutMs);
 }
 
-function nextMetadataChange(app: App, file: TFile, options: {
-	timeoutMs?: number;
-	matches?: (cache: CachedMetadata) => boolean;
-} = {}): Promise<void> {
+function nextMetadataChange(app: App, file: TFile, timeoutMs = 2000): Promise<void> {
 	const { metadataCache } = app;
 	const win = activeWindow;
 	return new Promise((resolve) => {
@@ -39,10 +36,10 @@ function nextMetadataChange(app: App, file: TFile, options: {
 			metadataCache.offref(ref);
 			resolve();
 		};
-		const ref = metadataCache.on('changed', (changed, _data, cache) => {
-			if (changed.path === file.path && (!options.matches || options.matches(cache))) done();
+		const ref = metadataCache.on('changed', (changed) => {
+			if (changed.path === file.path) done();
 		});
-		const timer = win.setTimeout(done, options.timeoutMs ?? 2000);
+		const timer = win.setTimeout(done, timeoutMs);
 	});
 }
 
@@ -52,19 +49,34 @@ export async function updateFrontmatter(app: App, path: string, edit: (frontmatt
 	if (!(file instanceof TFile)) {
 		throw new Error(`File not found: ${path}`);
 	}
-	let expected: Record<string, unknown> | null = null;
-	const parsed = nextMetadataChange(app, file, {
-		matches: (cache) => expected !== null && Object.entries(expected)
-			.every(([key, value]) => JSON.stringify(cache.frontmatter?.[key]) === JSON.stringify(value)),
+	await withMetadataSettled(app, file, () => app.fileManager.processFrontMatter(file, edit));
+}
+
+/** Subscribe before editing; only a cache event for the final written bytes establishes settlement. */
+export async function withMetadataSettled(app: App, file: TFile, write: () => Promise<void>): Promise<void> {
+	const before = await app.vault.read(file);
+	const win = activeWindow;
+	let expected: string | undefined;
+	let indexed: string | undefined;
+	let finish: () => void = () => {};
+	let timer: number | undefined;
+	const ref = app.metadataCache.on('changed', (changed, data) => {
+		if (changed.path !== file.path) return;
+		indexed = data;
+		if (expected !== undefined && data === expected) finish();
 	});
-	let changed = false;
-	await app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-		const before = JSON.stringify(frontmatter);
-		edit(frontmatter);
-		expected = { ...frontmatter };
-		changed = JSON.stringify(frontmatter) !== before;
-	});
-	if (changed) await parsed;
+	try {
+		await write();
+		expected = await app.vault.read(file);
+		if (expected === before || indexed === expected) return;
+		await new Promise<void>((resolve, reject) => {
+			finish = resolve;
+			timer = win.setTimeout(() => reject(new Error(`Metadata did not settle for ${file.path}. Run the converter again.`)), 2000);
+		});
+	} finally {
+		if (timer !== undefined) win.clearTimeout(timer);
+		app.metadataCache.offref(ref);
+	}
 }
 
 export async function openNoteInTab(app: App, path: string): Promise<void> {

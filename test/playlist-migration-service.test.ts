@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
@@ -22,72 +22,7 @@ vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
 	},
 }));
 
-vi.mock('obsidian', () => {
-	const frontmatter = (content: string): Record<string, unknown> => JSON.parse(content.split('\n')[1] ?? '{}');
-	const body = (content: string) => content.split('\n').slice(3).join('\n');
-	class File {
-		extension: string;
-		basename: string;
-		parent: { path: string };
-		constructor(readonly path: string) {
-			this.extension = path.split('.').at(-1) ?? '';
-			this.basename = path.split('/').at(-1)?.replace(/\.[^.]+$/, '') ?? '';
-			this.parent = { path: path.split('/').slice(0, -1).join('/') };
-		}
-	}
-	class App {
-		files = new Map<string, File>();
-		contents = new Map<string, string>();
-		staleCache = new Map<string, Record<string, unknown>>();
-		failPath = '';
-		vault = {
-			getMarkdownFiles: () => [...this.files.values()].filter((file) => file.extension === 'md'),
-			getAllLoadedFiles: () => [...this.files.values()],
-			getFileByPath: (path: string) => this.files.get(path) ?? null,
-			read: (file: File) => Promise.resolve(this.contents.get(file.path) ?? ''),
-			create: (path: string, content: string) => {
-				if (this.files.has(path)) return Promise.reject(new Error('File exists'));
-				const file = new File(path);
-				this.files.set(path, file);
-				this.contents.set(path, content);
-				return Promise.resolve(file);
-			},
-			process: (file: File, edit: (content: string) => string) => {
-				const content = edit(this.contents.get(file.path) ?? '');
-				this.contents.set(file.path, content);
-				return Promise.resolve(content);
-			},
-		};
-		metadataCache = {
-			getFileCache: (file: File) => ({
-				frontmatter: this.staleCache.get(file.path) ?? frontmatter(this.contents.get(file.path) ?? ''),
-				embeds: [],
-			}),
-			getFirstLinkpathDest: (link: string) => {
-				const path = link.replace(/\.md$/, '');
-				return this.files.get(link) ?? this.files.get(`${path}.md`) ?? null;
-			},
-		};
-		fileManager = {
-			processFrontMatter: (file: File, edit: (fm: Record<string, unknown>) => void) => {
-				if (file.path === this.failPath) return Promise.reject(new Error('Write denied'));
-				const content = this.contents.get(file.path) ?? '';
-				const fm = frontmatter(content);
-				edit(fm);
-				this.contents.set(file.path, `---\n${JSON.stringify(fm)}\n---\n${body(content)}`);
-				return Promise.resolve();
-			},
-		};
-	}
-	return {
-		App, TFile: File, Notice: class { setMessage() {} hide() {} },
-		getFrontMatterInfo: (content: string) => ({
-			exists: content.startsWith('---\n'), frontmatter: content.split('\n')[1] ?? '{}',
-			contentStart: content.indexOf('\n---\n') + 5,
-		}),
-		parseYaml: (value: string) => JSON.parse(value),
-	};
-});
+vi.mock('obsidian', () => import('./helpers/migration-obsidian'));
 
 function seed(app: App, path: string, fm: Record<string, unknown>) {
 	return app.vault.create(path, `---\n${JSON.stringify(fm)}\n---\nOriginal body\n`);
@@ -120,8 +55,14 @@ async function openPreview(host: Awaited<ReturnType<typeof fixture>>) {
 }
 
 beforeEach(() => {
+	vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
 	preview.plan = undefined;
 	preview.finish = undefined;
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe('playlist migration service', () => {
