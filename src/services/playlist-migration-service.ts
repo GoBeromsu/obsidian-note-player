@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, Notice, parseYaml, type App, type CachedMetadata } from 'obsidian';
+import { getFrontMatterInfo, Notice, parseYaml, type App } from 'obsidian';
 import { createPlaylistBaseContent } from '../domain/base-files';
 import { LEGACY_TRACKS_KEY } from '../domain/config';
 import { NOTICE_CATALOG, renderNotice } from '../domain/notices';
@@ -10,7 +10,7 @@ import { showNotice } from '../ui/notices';
 import { MigrationPreviewModal } from '../ui/views/MigrationPreviewModal';
 import { collectMigrationPlan, MIGRATION_BASE_MARKER, type MigrationFailure, type MigrationScan } from './playlist-migration-plan';
 import { withMetadataSettled } from './vault-io';
-import { settledMigrationMetadata } from './migration-metadata';
+import { alreadyConverted, convertMigrationContent, migrationEmbeds, migrationFrontmatter } from './migration-content';
 
 interface MigrationHost {
 	readonly app: App;
@@ -41,16 +41,19 @@ async function previewMigration(host: MigrationHost): Promise<void> {
 	for (const { path: name, reason } of failures) showNotice('migration_failed', { name, reason });
 	if (!plan.totals.playlists && !plan.conflicts.length && !plan.invalid.length) {
 		if (failures.length) return;
+		const noOpSettings = { ...host.settings };
 		const cleanup = await clearLegacySetting(host);
 		for (const { path: name, reason } of cleanup) showNotice('migration_failed', { name, reason });
 		if (cleanup.length) return;
-		for (const [file, indexed] of scan.versions) {
+		const basePaths = host.app.vault.getAllLoadedFiles().filter((file) => file.path.endsWith('.base')).map((file) => file.path);
+		const remaining: string[] = [];
+		for (const file of scan.candidates) {
 			if (host.app.vault.getFileByPath(file.path) !== file
-				|| file.stat.mtime !== indexed.mtime || file.stat.size !== indexed.size
-				|| host.app.metadataCache.getFileCache(file) !== indexed.cache) {
-				showNotice('migration_failed', { name: file.path, reason: 'Metadata is not ready. Wait for indexing and run the converter again.' });
-				return;
-			}
+				|| !alreadyConverted(await host.app.vault.read(file), basePaths, noOpSettings)) remaining.push(file.path);
+		}
+		if (remaining.length) {
+			for (const name of remaining) showNotice('migration_failed', { name, reason: 'Needs review: playlist still needs conversion.' });
+			return;
 		}
 		showNotice('migration_already_bases');
 		return;
@@ -96,15 +99,24 @@ async function applyMigration(
 				}
 				const note = app.vault.getFileByPath(playlist.notePath);
 				if (!note) throw new Error('Playlist note no longer exists.');
-				await settledMigrationMetadata(app, note);
-				const embedCount = (cache: CachedMetadata) =>
-					(cache.embeds ?? []).filter((embed) =>
-						app.metadataCache.getFirstLinkpathDest(embed.link, note.path)?.path === playlist.basePath).length;
+				const frontmatter = current.frontmatter.get(note.path);
+				if (!frontmatter) throw new Error('Playlist frontmatter is unavailable.');
+				const basePaths = app.vault.getAllLoadedFiles().filter((file) => file.path.endsWith('.base')).map((file) => file.path);
+				// Write the pairing before creating its base, so a racing embed cannot create a second base.
+				const indexed = await withMetadataSettled(app, note, async () => {
+					await app.vault.process(note, (content) => convertMigrationContent(content, {
+						playlist, settings, basePaths, frontmatter,
+					}));
+				});
+				if (indexed && (indexed.embeds ?? []).filter((embed) =>
+					embed.link.split('|')[0] === playlist.basePath
+					|| embed.link.split('|')[0] === playlist.basePath.replace(/\.base$/, '')).length !== 1) {
+					throw new Error('Companion base embed was not preserved. Run the converter again.');
+				}
 				if (playlist.createBase) {
 					await app.vault.create(playlist.basePath,
 						`${MIGRATION_BASE_MARKER}${JSON.stringify(note.path)}\n${createPlaylistBaseContent(settings)}`);
 				}
-				const editsNote = playlist.appendEmbed || playlist.renameLegacyKey;
 				for (const [trackIndex, path] of playlist.membershipAdds.entries()) {
 					const track = app.vault.getFileByPath(path);
 					if (!track) throw new Error(`Track no longer exists: ${path}`);
@@ -122,36 +134,23 @@ async function applyMigration(
 							added = true;
 						}
 					});
-					if (!editsNote && trackIndex === playlist.membershipAdds.length - 1) {
+					if (trackIndex === playlist.membershipAdds.length - 1) {
 						await withMetadataSettled(app, track, writeMembership);
 					} else {
 						await writeMembership();
 					}
 					if (added) linked++;
 				}
-				const indexed = await settledMigrationMetadata(app, note);
-				if (embedCount(indexed.cache) > 1) throw new Error('Multiple companion base embeds exist; skipped.');
-				await withMetadataSettled(app, note, async () => {
-					await app.vault.process(note, (content) => {
-						if (content !== indexed.data || note.stat.mtime !== indexed.mtime || note.stat.size !== indexed.size) {
-							throw new Error('Metadata is not ready for the current playlist version. Run the converter again.');
-						}
-						return embedCount(indexed.cache) ? content : `${content}\n![[${playlist.basePath}]]\n`;
-					});
-				});
-				if (playlist.renameLegacyKey) {
-					await withMetadataSettled(app, note, async () => {
-						const key = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
-						await app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
-							if (Object.hasOwn(fm, 'tracks_legacy')) throw new Error('tracks_legacy already exists; skipped.');
-							if (!Array.isArray(fm[key])) throw new Error('Legacy track list changed; run the converter again.');
-							fm.tracks_legacy = fm[key];
-							delete fm[key];
-						});
-					});
-				}
-				if (embedCount((await settledMigrationMetadata(app, note)).cache) !== 1) {
-					throw new Error('Companion base embed was not preserved. Run the converter again.');
+				const finalContent = await app.vault.read(note);
+				const final = migrationEmbeds(finalContent, [...basePaths, playlist.basePath]);
+				const fm = migrationFrontmatter(finalContent);
+				const key = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
+				if (final.needsReview || final.embeddedBases.length !== 1
+					|| final.embeddedBases[0] !== playlist.basePath
+					|| !hasType(fm, settings.playlistNoteType)
+					|| JSON.stringify(fm.tracks_legacy) !== JSON.stringify(frontmatter[key] ?? frontmatter.tracks_legacy)
+					|| key !== 'tracks_legacy' && Object.hasOwn(fm, key)) {
+					throw new Error('Companion embed or archive was not preserved. Run the converter again.');
 				}
 				converted++;
 				missing += playlist.missing.length;

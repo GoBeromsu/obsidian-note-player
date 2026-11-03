@@ -4,7 +4,7 @@ import { planPlaylistMigration, type MigrationPlaylistInput, type PlaylistMigrat
 import type { NotePlayerSettings } from '../types/settings';
 import { hasType } from '../utils/frontmatter';
 import { parsePlaylistTrackReference } from '../utils/wikilink';
-import { settledMigrationMetadata } from './migration-metadata';
+import { migrationEmbeds } from './migration-content';
 
 // A base created before an interrupted conversion must be recoverable without claiming a user's base.
 export const MIGRATION_BASE_MARKER = '# note-player migration for: ';
@@ -17,7 +17,8 @@ export interface MigrationFailure {
 export interface MigrationScan {
 	readonly plan: PlaylistMigrationPlan;
 	readonly failures: readonly MigrationFailure[];
-	readonly versions: ReadonlyMap<TFile, Awaited<ReturnType<typeof settledMigrationMetadata>>>;
+	readonly candidates: readonly TFile[];
+	readonly frontmatter: ReadonlyMap<string, Record<string, unknown>>;
 }
 
 export async function collectMigrationPlan(app: App, settings: NotePlayerSettings, notePath?: string): Promise<MigrationScan> {
@@ -25,7 +26,8 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 	const folder = settings.playlistFolder.replace(/^\/|\/$/g, '');
 	const playlists: MigrationPlaylistInput[] = [];
 	const failures: MigrationFailure[] = [];
-	const versions = new Map<TFile, Awaited<ReturnType<typeof settledMigrationMetadata>>>();
+	const candidates: TFile[] = [];
+	const frontmatters = new Map<string, Record<string, unknown>>();
 	const membership = new Map<string, string[]>();
 	const existingPaths = new Set(app.vault.getAllLoadedFiles().map((file) => file.path));
 	const resolve = (raw: unknown, source: string): TFile | null => {
@@ -46,28 +48,21 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
 			const frontmatter = Object.fromEntries(Object.entries(parsed));
 			if (!hasType(frontmatter, settings.playlistNoteType)) continue;
-			const indexed = await settledMigrationMetadata(app, file);
-			const { cache } = indexed;
-			if (indexed.data !== content || [legacyKey, 'tracks_legacy'].some((key) =>
-				JSON.stringify(cache.frontmatter?.[key]) !== JSON.stringify(frontmatter[key]))) {
-				throw new Error('Metadata is not ready. Wait for indexing and run the converter again.');
-			}
-			versions.set(file, indexed);
+			candidates.push(file);
+			frontmatters.set(file.path, frontmatter);
 			const raw: unknown = frontmatter[legacyKey] ?? frontmatter.tracks_legacy;
 			const refs: unknown[] = Array.isArray(raw) ? raw : [];
-			const embeddedBases = new Set<string>();
-			for (const embed of cache.embeds ?? []) {
-				const base = app.metadataCache.getFirstLinkpathDest(embed.link, file.path);
-				if (base?.extension === 'base') embeddedBases.add(base.path);
-			}
+			const embeds = migrationEmbeds(content, [...existingPaths].filter((path) => path.endsWith('.base')));
+			if (embeds.needsReview) throw new Error('Needs review: companion embed is ambiguous; skipped.');
+			const embeddedBases = new Set([...embeds.ownedBases, ...embeds.embeddedBases]);
 			let pendingBase: string | undefined;
 			if (!embeddedBases.size) {
 				const marker = `${MIGRATION_BASE_MARKER}${JSON.stringify(file.path)}\n`;
 				for (const path of existingPaths) {
 					const base = path.endsWith('.base') ? app.vault.getFileByPath(path) : null;
 					if (base && (await app.vault.read(base)).startsWith(marker)) {
+						if (pendingBase) throw new Error('Needs review: multiple owned companion bases exist; skipped.');
 						pendingBase = base.path;
-						break;
 					}
 				}
 			}
@@ -90,7 +85,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			playlists.push({
 				path: file.path, basename: file.basename, folder: file.parent?.path ?? '',
 				frontmatter, trackRefs: refs, resolvedTrackPaths: paths, embeddedBases: [...embeddedBases],
-				pendingBase,
+				pendingBase, ownedBase: embeds.ownedBases[0],
 			});
 		} catch (error: unknown) {
 			failures.push({ path: file.path, reason: error instanceof Error ? error.message : String(error) });
@@ -99,6 +94,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 	return {
 		plan: planPlaylistMigration({ playlists, trackMembership: membership, mapping: settings, existingPaths }),
 		failures,
-		versions,
+		candidates,
+		frontmatter: frontmatters,
 	};
 }

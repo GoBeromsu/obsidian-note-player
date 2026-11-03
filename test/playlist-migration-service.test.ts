@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
-import { observeTestMetadata } from './helpers/migration-lifecycle';
-import { state } from './helpers/migration-obsidian';
+import { notices, state } from './helpers/migration-obsidian';
+import { NOTICE_CATALOG, renderNotice } from '../src/domain/notices';
 import type { PlaylistMigrationPlan } from '../src/domain/playlist-migration';
 
 const preview = vi.hoisted(() => ({
@@ -11,7 +11,6 @@ const preview = vi.hoisted(() => ({
 	finish: undefined as ((confirmed: boolean) => void) | undefined,
 	opened: () => {},
 }));
-const observers: (() => void)[] = [];
 
 vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
 	MigrationPreviewModal: class {
@@ -39,7 +38,6 @@ function readNote(app: App, path: string): Promise<string> {
 
 async function fixture(legacyKey = 'songs') {
 	const app = new App();
-	observers.push(observeTestMetadata(app));
 	await seed(app, 'Playlists/Mix.md', { type: 'music-playlist', [legacyKey]: ['[[Tracks/A]]', '[[Missing]]'] });
 	await seed(app, 'Tracks/A.md', { type: 'music', playlists: ['[[Other]]'] });
 	state(app).resolve();
@@ -60,19 +58,66 @@ async function openPreview(host: Awaited<ReturnType<typeof fixture>>) {
 }
 
 beforeEach(() => {
+	notices.length = 0;
 	vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
 	preview.plan = undefined;
 	preview.finish = undefined;
 });
 
 afterEach(() => {
-	for (const dispose of observers.splice(0)) dispose();
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
 
 describe('playlist migration service', () => {
+	it('waits for byte-matched post-write indexing and cleans temporary listeners', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		fake.pauseIndexing = true;
+		let written: () => void = () => {};
+		const signal = new Promise<void>((resolve) => { written = resolve; });
+		fake.onWrite = (file) => { if (file.path === 'Playlists/Mix.md') written(); };
+		const { done } = await openPreview(host);
+		let completed = false;
+		void done.then(() => { completed = true; });
+		preview.finish?.(true);
+		await signal;
+		expect(completed).toBe(false);
+		expect(fake.handlers.size).toBe(1);
+
+		fake.pauseIndexing = false;
+		fake.flush();
+		await done;
+
+		expect(fake.handlers.size).toBe(0);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 1 }));
+	});
+
+	it('times out post-write indexing truthfully and reuses the owned block on retry', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		fake.pauseIndexing = true;
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+		const { done } = await openPreview(host);
+		preview.finish?.(true);
+		await vi.runAllTimersAsync();
+		await done;
+		expect(notices.at(-1)).toContain(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 0, tracks: 0, missing: 0 }));
+		expect(fake.handlers.size).toBe(0);
+		fake.pauseIndexing = false;
+		fake.flush();
+
+		const retry = await openPreview(host);
+		preview.finish?.(true);
+		await retry.done;
+
+		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual(['Playlists/Mix.base']);
+		expect(fake.contents.get('Playlists/Mix.md')?.match(/!\[\[/g)).toHaveLength(1);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 1 }));
+	});
+
 	it('preserves the archive and body while linking resolved tracks and keeping unknown memberships', async () => {
 		const host = await fixture();
 		const { done } = await openPreview(host);
@@ -81,7 +126,7 @@ describe('playlist migration service', () => {
 		await done;
 
 		expect(await readNote(host.app, 'Playlists/Mix.md')).toBe(
-			'---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]","[[Missing]]"]}\n---\nOriginal body\n\n![[Playlists/Mix.base]]\n',
+			'---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]","[[Missing]]"]}\n---\nOriginal body\n\n%% note-player:playlist-base %%\n![[Playlists/Mix.base]]\n',
 		);
 		expect(await readNote(host.app, 'Tracks/A.md')).toContain(
 			'"playlists":["[[Other]]","[[Playlists/Mix]]"]',
@@ -156,9 +201,9 @@ describe('playlist migration service', () => {
 		preview.finish?.(true);
 		await done;
 
-		expect(await readNote(host.app, 'Playlists/Mix.md')).toContain('"songs":');
+		expect(await readNote(host.app, 'Tracks/A.md')).toContain('"playlists":["[[Other]]"]');
 		expect(await readNote(host.app, 'Playlists/Next.md')).toContain('"tracks_legacy":[]');
-		expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+		expect(host.settings.legacyPlaylistTrackProperty).toBeUndefined();
 	});
 
 	it('does not duplicate bases or memberships when metadata still contains the legacy state', async () => {

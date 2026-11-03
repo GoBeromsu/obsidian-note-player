@@ -199,7 +199,8 @@ export class App {
 
 export const getFrontMatterInfo = (content: string) => ({
 	exists: content.startsWith('---\n'), frontmatter: content.split('\n')[1] ?? '{}',
-	from: 4, to: content.indexOf('\n---\n'),
+	from: 4, to: content.indexOf('\n---\n') + 1,
 	contentStart: content.indexOf('\n---\n') + 5,
 });
 export const parseYaml = (value: string): unknown => JSON.parse(value);
+export const stringifyYaml = (value: unknown): string => JSON.stringify(value) + '\n';

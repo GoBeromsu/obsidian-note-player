@@ -13,6 +13,7 @@ export interface MigrationPlaylistInput {
   readonly resolvedTrackPaths: readonly (string | null)[];
   readonly embeddedBases: readonly string[];
   readonly pendingBase?: string;
+  readonly ownedBase?: string;
 }
 
 export interface PlaylistMigrationInput {
@@ -104,7 +105,8 @@ export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMi
     playlists.push({
       notePath: note.path,
       basePath,
-      createBase: embeddedBase === undefined && note.pendingBase === undefined,
+      createBase: embeddedBase === undefined && note.pendingBase === undefined
+        || note.ownedBase !== undefined && !input.existingPaths.has(note.ownedBase),
       appendEmbed: embeddedBase === undefined,
       membershipAdds: [...membershipAdds],
       renameLegacyKey,

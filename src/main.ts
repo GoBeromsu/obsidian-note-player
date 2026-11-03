@@ -16,7 +16,6 @@ import { openCompanionBase, writeCompanionBaseFiles } from './services/companion
 import { TrackImporter } from './services/track-importer';
 import { PlaylistService } from './services/playlist-service';
 import { convertPlaylistNotes } from './services/playlist-migration-service';
-import { observeMigrationMetadata } from './services/migration-metadata';
 import { openNoteInTab, collectNoteSnapshots, collectBaseConfigs } from './services/vault-io';
 import { registerCommands } from './ui/commands';
 import { showNotice } from './ui/notices';
@@ -78,7 +77,6 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   });
 
   async onload(): Promise<void> {
-    observeMigrationMetadata(this.app, this);
     await this.loadSettings();
     let migratedFolders = false;
     for (const key of ['musicFolder', 'playlistFolder'] as const) {

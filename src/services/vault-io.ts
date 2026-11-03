@@ -1,4 +1,4 @@
-import { normalizePath, parseYaml, TFile, TFolder, type App } from 'obsidian';
+import { normalizePath, parseYaml, TFile, TFolder, type App, type CachedMetadata } from 'obsidian';
 import type { CompanionBaseFile } from '../domain/base-files';
 import { VAULT_ROOT } from '../domain/config';
 import { collectScopedFiles } from '../domain/music-scope';
@@ -53,26 +53,30 @@ export async function updateFrontmatter(app: App, path: string, edit: (frontmatt
 }
 
 /** Subscribe before editing; only a cache event for the final written bytes establishes settlement. */
-export async function withMetadataSettled(app: App, file: TFile, write: () => Promise<void>): Promise<void> {
+export async function withMetadataSettled(app: App, file: TFile, write: () => Promise<void>): Promise<CachedMetadata | undefined> {
 	const before = await app.vault.read(file);
 	const win = activeWindow;
 	let expected: string | undefined;
 	let indexed: string | undefined;
+	let indexedCache: CachedMetadata | undefined;
 	let finish: () => void = () => {};
 	let timer: number | undefined;
-	const ref = app.metadataCache.on('changed', (changed, data) => {
+	const ref = app.metadataCache.on('changed', (changed, data, cache) => {
 		if (changed.path !== file.path) return;
 		indexed = data;
+		indexedCache = cache;
 		if (expected !== undefined && data === expected) finish();
 	});
 	try {
 		await write();
 		expected = await app.vault.read(file);
-		if (expected === before || indexed === expected) return;
+		if (indexed === expected) return indexedCache;
+		if (expected === before) return;
 		await new Promise<void>((resolve, reject) => {
 			finish = resolve;
 			timer = win.setTimeout(() => reject(new Error(`Metadata did not settle for ${file.path}. Run the converter again.`)), 2000);
 		});
+		return indexedCache;
 	} finally {
 		if (timer !== undefined) win.clearTimeout(timer);
 		app.metadataCache.offref(ref);
