@@ -1,5 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { App, Plugin } from 'obsidian';
+import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, normalizeSettings, normalizeSettingValue } from '../src/domain/config';
+import { NotePlayerSettingsTab } from '../src/ui/settings';
+
+vi.mock('obsidian', () => ({
+  App: class {},
+  Plugin: class {},
+  PluginSettingTab: class {},
+  AbstractInputSuggest: class {},
+  // The assertions concern immediate settings state, not Obsidian's deferred persistence.
+  debounce: () => Object.assign(vi.fn(), { run: vi.fn() }),
+}));
+
+class SettingsHostStub extends Plugin {
+  settings = { ...DEFAULT_SETTINGS };
+  saveSettings = vi.fn(() => Promise.resolve());
+  refresh = vi.fn(() => Promise.resolve());
+  refreshCompanionBases = vi.fn(() => Promise.resolve());
+}
 
 const defaults = {
   musicUrlProperty: 'source',
@@ -113,9 +131,21 @@ describe('settings control value normalization', () => {
   it.each(Object.entries(defaults).flatMap(([key, expected]) =>
     ['', '  '].map((value) => ({ key, value, expected })),
   ))('stores $expected when the $key control is emptied', ({ key, value, expected }) => {
-    const settings = { ...DEFAULT_SETTINGS };
-    Object.assign(settings, { [key]: normalizeSettingValue(key, value) });
-    expect(settings).toHaveProperty(key, expected);
+    const app = new App();
+    const host = new SettingsHostStub(app, {
+      id: 'note-player',
+      name: 'Note Player',
+      version: '0.8.9',
+      minAppVersion: '1.14.4',
+      description: 'Settings test',
+      author: 'Test',
+    });
+    host.settings = { ...DEFAULT_SETTINGS, [key]: 'custom' };
+    const tab = new NotePlayerSettingsTab(app, host);
+
+    tab.setControlValue(key, value);
+
+    expect(host.settings).toHaveProperty(key, expected);
   });
 
   it('keeps non-mapping controls independent of property defaults', () => {
