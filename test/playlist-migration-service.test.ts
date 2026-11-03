@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
-import { observeMigrationMetadata } from '../src/services/migration-metadata';
+import { observeTestMetadata } from './helpers/migration-lifecycle';
 import { state } from './helpers/migration-obsidian';
 import type { PlaylistMigrationPlan } from '../src/domain/playlist-migration';
 
@@ -39,7 +39,7 @@ function readNote(app: App, path: string): Promise<string> {
 
 async function fixture(legacyKey = 'songs') {
 	const app = new App();
-	observers.push(observeMigrationMetadata(app));
+	observers.push(observeTestMetadata(app));
 	await seed(app, 'Playlists/Mix.md', { type: 'music-playlist', [legacyKey]: ['[[Tracks/A]]', '[[Missing]]'] });
 	await seed(app, 'Tracks/A.md', { type: 'music', playlists: ['[[Other]]'] });
 	state(app).resolve();
@@ -67,6 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	for (const dispose of observers.splice(0)) dispose();
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -171,7 +172,11 @@ describe('playlist migration service', () => {
 		const note = await readNote(host.app, 'Playlists/Mix.md');
 		const track = await readNote(host.app, 'Tracks/A.md');
 
-		await convertPlaylistNotes(host);
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+		const rerun = convertPlaylistNotes(host);
+		await vi.runAllTimersAsync();
+		await rerun;
 
 		expect(host.app.vault.getAllLoadedFiles().map((file) => file.path)).toEqual(paths);
 		expect(await readNote(host.app, 'Playlists/Mix.md')).toBe(note);

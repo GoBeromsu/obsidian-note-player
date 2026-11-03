@@ -1,4 +1,4 @@
-import type { App, CachedMetadata, TFile } from 'obsidian';
+import { getFrontMatterInfo, parseYaml, type App, type CachedMetadata, type Component, type Pos, type TFile } from 'obsidian';
 
 interface IndexedVersion {
 	readonly mtime: number;
@@ -7,19 +7,61 @@ interface IndexedVersion {
 	readonly data: string;
 }
 
-const states = new WeakMap<App, WeakMap<TFile, IndexedVersion>>();
+const states = new WeakMap<App, Map<string, IndexedVersion>>();
+
+function sameValue(left: unknown, right: unknown): boolean {
+	if (left === right) return true;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+			&& left.every((value, index) => sameValue(value, right[index]));
+	}
+	if (left instanceof Date || right instanceof Date) {
+		return left instanceof Date && right instanceof Date && left.getTime() === right.getTime();
+	}
+	if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+	const entries = Object.entries(left);
+	const other = new Map(Object.entries(right));
+	return entries.length === other.size && entries.every(([key, value]) => other.has(key) && sameValue(value, other.get(key)));
+}
+
+function cacheDescribesContent(cache: CachedMetadata, data: string): boolean {
+	const within = (position: Pos) => Number.isInteger(position.start.offset) && Number.isInteger(position.end.offset)
+		&& position.start.offset >= 0 && position.end.offset >= position.start.offset && position.end.offset <= data.length;
+	if ((cache.embeds ?? []).some((embed) => !within(embed.position)
+		|| data.slice(embed.position.start.offset, embed.position.end.offset) !== embed.original)) return false;
+	const sections = cache.sections ?? [];
+	if (sections.some((section) => !within(section.position))) return false;
+	const end = sections.at(-1)?.position.end.offset ?? 0;
+	if (end !== data.length && end !== data.trimEnd().length) return false;
+	const info = getFrontMatterInfo(data);
+	const position = cache.frontmatterPosition;
+	if (!info.exists) return !position && !cache.frontmatter;
+	if (!position || !within(position) || position.start.offset !== data.indexOf('---')
+		|| position.end.offset !== data.slice(0, info.contentStart).trimEnd().length) return false;
+	const block = getFrontMatterInfo(data.slice(position.start.offset, position.end.offset) + '\n');
+	if (!block.exists || block.frontmatter !== info.frontmatter) return false;
+	let parsed: unknown;
+	try {
+		parsed = parseYaml(info.frontmatter);
+	} catch (error: unknown) {
+		if (error instanceof Error) return false;
+		throw error;
+	}
+	const cached = Object.fromEntries(Object.entries(cache.frontmatter ?? {}).filter(([key]) =>
+		key !== 'position' || parsed && typeof parsed === 'object' && Object.hasOwn(parsed, key)));
+	return sameValue(parsed ?? {}, cached);
+}
 
 /** CachedMetadata has no public version stamp; record native parser events instead. */
-export function observeMigrationMetadata(app: App): () => void {
-	const versions = new WeakMap<TFile, IndexedVersion>();
+export function observeMigrationMetadata(app: App, owner: Pick<Component, 'registerEvent' | 'register'>): void {
+	const versions = new Map<string, IndexedVersion>();
 	states.set(app, versions);
-	const changed = app.metadataCache.on('changed', (file, data, cache) => {
-		versions.set(file, { mtime: file.stat.mtime, size: file.stat.size, cache, data });
-	});
-	return () => {
-		app.metadataCache.offref(changed);
+	owner.registerEvent(app.metadataCache.on('changed', (file, data, cache) => {
+		versions.set(file.path, { mtime: file.stat.mtime, size: file.stat.size, cache, data });
+	}));
+	owner.register(() => {
 		states.delete(app);
-	};
+	});
 }
 
 export function settledMigrationMetadata(app: App, file: TFile): Promise<IndexedVersion> {
@@ -35,17 +77,16 @@ export function settledMigrationMetadata(app: App, file: TFile): Promise<Indexed
 				if (!active || file.stat.mtime !== mtime || file.stat.size !== size) return;
 				const cache = app.metadataCache.getFileCache(file);
 				if (!cache) return;
-				const indexed = versions.get(file);
+				const indexed = versions.get(file.path);
 				const matches = indexed?.mtime === mtime && indexed.size === size && indexed.cache === cache && indexed.data === data;
-				// Native getFileCache uses fileCache[path].hash; its stamp survives late observer attachment.
-				// This field is not public API: an unknown format must never certify a cached snapshot.
-				const fileCache: unknown = Reflect.get(app.metadataCache, 'fileCache');
-				const native: unknown = fileCache && typeof fileCache === 'object' ? Reflect.get(fileCache, file.path) : null;
-				const nativeMatches = native && typeof native === 'object'
-					&& Reflect.get(native, 'mtime') === mtime && Reflect.get(native, 'size') === size;
-				if (!matches && !nativeMatches) return;
+				if (!matches) {
+					if (indexed) return;
+					const cached = await app.vault.cachedRead(file);
+					if (!active || cached !== data || file.stat.mtime !== mtime || file.stat.size !== size
+						|| app.metadataCache.getFileCache(file) !== cache || !cacheDescribesContent(cache, cached)) return;
+				}
 				const version = { mtime, size, cache, data };
-				versions.set(file, version);
+				versions.set(file.path, version);
 				finish();
 				resolve(version);
 			} catch (error: unknown) {

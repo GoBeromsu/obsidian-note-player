@@ -78,7 +78,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   });
 
   async onload(): Promise<void> {
-    this.register(observeMigrationMetadata(this.app));
+    observeMigrationMetadata(this.app, this);
     await this.loadSettings();
     let migratedFolders = false;
     for (const key of ['musicFolder', 'playlistFolder'] as const) {

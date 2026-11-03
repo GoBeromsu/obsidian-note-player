@@ -1,9 +1,23 @@
-type Cache = { frontmatter: Record<string, unknown>; embeds: { link: string; original: string }[] };
+import type { Pos } from 'obsidian';
+
+type Cache = {
+	frontmatter: Record<string, unknown>;
+	frontmatterPosition?: Pos;
+	sections?: { type: string; position: Pos }[];
+	embeds: { link: string; original: string; position: Pos }[];
+};
 type Changed = (file: TFile, data: string, cache: Cache) => void;
-type Version = { mtime: number; size: number };
 
 const frontmatter = (content: string): Record<string, unknown> => JSON.parse(content.split('\n')[1] ?? '{}');
 const body = (content: string) => content.split('\n').slice(3).join('\n');
+
+function position(content: string, start: number, end: number): Pos {
+	const loc = (offset: number) => ({
+		offset, line: content.slice(0, offset).split('\n').length - 1,
+		col: offset - content.lastIndexOf('\n', offset - 1) - 1,
+	});
+	return { start: loc(start), end: loc(end) };
+}
 
 export class TFile {
 	readonly extension: string;
@@ -20,20 +34,31 @@ export class TFile {
 function cacheFor(content: string): Cache {
 	const embeds: Cache['embeds'] = [];
 	let fenced = false;
+	let offset = content.indexOf('\n---\n') + 5;
 	for (const line of body(content).split('\n')) {
+		const lineOffset = offset;
+		offset += line.length + 1;
 		if (line.startsWith('```') || line.startsWith('~~~')) {
 			fenced = !fenced;
 			continue;
 		}
 		if (fenced) continue;
+		let partOffset = 0;
 		for (const [index, part] of line.split('`').entries()) {
-			if (index % 2) continue;
-			for (const match of part.matchAll(/!\[\[([^\]]+)\]\]/g)) {
-				embeds.push({ link: match[1] ?? '', original: match[0] });
+			if (!(index % 2)) for (const match of part.matchAll(/!\[\[([^\]]+)\]\]/g)) {
+				const start = lineOffset + partOffset + match.index;
+				embeds.push({ link: match[1] ?? '', original: match[0], position: position(content, start, start + match[0].length) });
 			}
+			partOffset += part.length + 1;
 		}
 	}
-	return { frontmatter: frontmatter(content), embeds };
+	const end = content.indexOf('\n---\n') + 4;
+	const frontmatterPosition = position(content, 0, end);
+	const sections = [{ type: 'yaml', position: frontmatterPosition }];
+	if (content.trimEnd().length > end + 1) {
+		sections.push({ type: 'paragraph', position: position(content, end + 1, content.trimEnd().length) });
+	}
+	return { frontmatter: frontmatter(content), embeds, frontmatterPosition, sections };
 }
 
 export const notices: string[] = [];
@@ -54,12 +79,11 @@ export class App {
 	readonly files = new Map<string, TFile>();
 	readonly contents = new Map<string, string>();
 	readonly cache = new Map<string, Cache>();
-	readonly fileCache: Record<string, Version> = {};
 	readonly parsedBodies = new Map<string, readonly string[]>();
 	readonly handlers = new Set<Changed>();
 	readonly resolvedHandlers = new Set<() => void>();
 	readonly modifyHandlers = new Set<(file: TFile) => void>();
-	readonly pending: { file: TFile; data: string; version: Version }[] = [];
+	readonly pending: { file: TFile; data: string }[] = [];
 	asyncIndexing = false;
 	initiallyResolved = false;
 	pauseIndexing = false;
@@ -67,18 +91,27 @@ export class App {
 	onSubscribe: (name: string) => void = () => {};
 	constructor() { apps.set(this, this); }
 
-	index(file: TFile, data: string, version: Version = { ...file.stat }): void {
+	index(file: TFile, data: string): void {
 		if (file.extension !== 'md') return;
 		const cache = cacheFor(data);
 		const parsed = this.parsedBodies.get(body(data));
-		if (parsed) cache.embeds = parsed.map((link) => ({ link, original: `![[${link}]]` }));
+		if (parsed) {
+			const seen = new Map<string, number>();
+			cache.embeds = parsed.map((link) => {
+				const choices = [...data.matchAll(/!\[\[([^\]]+)\]\]/g)].filter((match) => match[1] === link);
+				const index = seen.get(link) ?? 0;
+				seen.set(link, index + 1);
+				const match = choices[choices.length - parsed.filter((value) => value === link).length + index];
+				if (!match) throw new Error('Missing canned embed fixture');
+				return { link, original: match[0], position: position(data, match.index, match.index + match[0].length) };
+			});
+		}
 		this.cache.set(file.path, cache);
-		this.metadataCache.fileCache[file.path] = { ...version };
 		for (const handler of this.handlers) handler(file, data, cache);
 	}
 
 	flush(): void {
-		for (const { file, data, version } of this.pending.splice(0)) this.index(file, data, version);
+		for (const { file, data } of this.pending.splice(0)) this.index(file, data);
 	}
 
 	resolve(): void {
@@ -92,11 +125,10 @@ export class App {
 		file.stat.mtime++;
 		file.stat.size = new TextEncoder().encode(data).byteLength;
 		for (const handler of this.modifyHandlers) handler(file);
-		const version = { mtime: file.stat.mtime, size: file.stat.size };
-		if (this.pauseIndexing) this.pending.push({ file, data, version });
+		if (this.pauseIndexing) this.pending.push({ file, data });
 		else {
 			const index = () => {
-				this.index(file, data, version);
+				this.index(file, data);
 				if (this.initiallyResolved) for (const handler of this.resolvedHandlers) handler();
 			};
 			if (this.asyncIndexing) queueMicrotask(index);
@@ -116,6 +148,7 @@ export class App {
 		getFileByPath: (path: string) => this.files.get(path) ?? null,
 		getAbstractFileByPath: (path: string) => this.files.get(path) ?? null,
 		read: (file: TFile) => Promise.resolve(this.contents.get(file.path) ?? ''),
+		cachedRead: (file: TFile) => Promise.resolve(this.contents.get(file.path) ?? ''),
 		create: (path: string, content: string) => {
 			if (this.files.has(path)) return Promise.reject(new Error('File exists'));
 			const file = new TFile(path);
@@ -130,8 +163,7 @@ export class App {
 		},
 	};
 
-	readonly metadataCache = {
-		fileCache: this.fileCache,
+	readonly metadataCache = new Proxy({
 		getFileCache: (file: TFile) => this.cache.get(file.path) ?? null,
 		getFirstLinkpathDest: (link: string) => {
 			const path = link.replace(/\.md$/, '');
@@ -147,7 +179,12 @@ export class App {
 			for (const handler of this.handlers) if (handler === ref.callback) this.handlers.delete(handler);
 			for (const handler of this.resolvedHandlers) if (handler === ref.callback) this.resolvedHandlers.delete(handler);
 		},
-	};
+	}, {
+		get(target, property, receiver) {
+			if (!Reflect.has(target, property)) throw new Error(`Non-public metadata member: ${String(property)}`);
+			return Reflect.get(target, property, receiver);
+		},
+	});
 
 	readonly fileManager = {
 		processFrontMatter: (file: TFile, edit: (fm: Record<string, unknown>) => void) => {
@@ -162,6 +199,7 @@ export class App {
 
 export const getFrontMatterInfo = (content: string) => ({
 	exists: content.startsWith('---\n'), frontmatter: content.split('\n')[1] ?? '{}',
+	from: 4, to: content.indexOf('\n---\n'),
 	contentStart: content.indexOf('\n---\n') + 5,
 });
 export const parseYaml = (value: string): unknown => JSON.parse(value);

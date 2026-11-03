@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from 'obsidian';
+import { App, type MetadataCache } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { NOTICE_CATALOG, renderNotice } from '../src/domain/notices';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
 import { updateFrontmatter } from '../src/services/vault-io';
-import { observeMigrationMetadata, settledMigrationMetadata } from '../src/services/migration-metadata';
+import { settledMigrationMetadata } from '../src/services/migration-metadata';
+import { observeTestMetadata } from './helpers/migration-lifecycle';
 import * as noticeService from '../src/ui/notices';
 import type { PlaylistMigrationPlan } from '../src/domain/playlist-migration';
 import { notices, state } from './helpers/migration-obsidian';
@@ -36,11 +37,11 @@ function signal<T>() {
 
 async function fixture(resolved = true, lateObserver = false) {
 	const app = new App();
-	if (!lateObserver) observers.push(observeMigrationMetadata(app));
+	if (!lateObserver) observers.push(observeTestMetadata(app));
 	await app.vault.create('Playlists/Mix.md', '---\n{"type":"music-playlist","songs":["[[Tracks/A]]"]}\n---\nOriginal body\n');
 	await app.vault.create('Tracks/A.md', '---\n{"type":"music","playlists":["[[Other]]"]}\n---\nTrack body\n');
 	if (resolved) state(app).resolve();
-	if (lateObserver) observers.push(observeMigrationMetadata(app));
+	if (lateObserver) observers.push(observeTestMetadata(app));
 	return {
 		app, settings: { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists', legacyPlaylistTrackProperty: 'songs' },
 		saveSettings: vi.fn(() => Promise.resolve()),
@@ -75,6 +76,34 @@ afterEach(() => {
 });
 
 describe('migration gate regressions', () => {
+	it('converts using only declared public metadata members', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const metadata = host.app.metadataCache;
+		const surface = {
+			getFileCache: metadata.getFileCache,
+			getFirstLinkpathDest: metadata.getFirstLinkpathDest,
+			on: metadata.on,
+			offref: metadata.offref,
+		} satisfies Pick<MetadataCache, 'getFileCache' | 'getFirstLinkpathDest' | 'on' | 'offref'>;
+		const privateReads: PropertyKey[] = [];
+		Reflect.set(fake, 'metadataCache', new Proxy(surface, {
+			get(target, property, receiver) {
+				if (!Reflect.has(target, property)) {
+					privateReads.push(property);
+					throw new Error(`Non-public metadata member: ${String(property)}`);
+				}
+				return Reflect.get(target, property, receiver);
+			},
+		}));
+
+		await run(host);
+
+		expect(privateReads).toEqual([]);
+		expect(fake.cache.get('Playlists/Mix.md')?.embeds.map((embed) => embed.link)).toEqual(['Playlists/Mix.base']);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 0 }));
+	});
+
 	it('converts an already-indexed playlist when the observer attaches after initial resolution', async () => {
 		const host = await fixture(true, true);
 		const fake = state(host.app);
@@ -156,10 +185,20 @@ describe('migration gate regressions', () => {
 		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: note.path }));
 	});
 
-	it.each([null, {}, { mtime: 'unknown', size: 0 }, { mtime: 0, size: 0 }])('does not certify an unknown or mismatched native version after late attachment: %s', async (native) => {
+	it.each(['missing sections', 'out of bounds', 'section end', 'frontmatter value', 'frontmatter end', 'embed original', 'embed bounds'])('does not certify an inconsistent public cache after late attachment: %s', async (problem) => {
 		const host = await fixture(true, true);
 		const fake = state(host.app);
-		Reflect.set(fake.metadataCache, 'fileCache', { 'Playlists/Mix.md': native });
+		const cache = fake.cache.get('Playlists/Mix.md');
+		if (!cache?.frontmatterPosition) throw new Error('Missing fixture metadata');
+		switch (problem) {
+			case 'missing sections': cache.sections = []; break;
+			case 'out of bounds': cache.sections = [{ type: 'paragraph', position: { start: { line: 0, col: 0, offset: -1 }, end: { line: 0, col: 0, offset: 99999 } } }]; break;
+			case 'section end': cache.sections = [{ type: 'paragraph', position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 0, offset: 1 } } }]; break;
+			case 'frontmatter value': cache.frontmatter = { ...cache.frontmatter, songs: [] }; break;
+			case 'frontmatter end': cache.frontmatterPosition = { ...cache.frontmatterPosition, end: { ...cache.frontmatterPosition.end, offset: 1 } }; break;
+			case 'embed original': cache.embeds = [{ link: 'Playlists/Mix.base', original: '![[Playlists/Mix.base]]', position: cache.frontmatterPosition }]; break;
+			case 'embed bounds': cache.embeds = [{ link: 'Playlists/Mix.base', original: '![[Playlists/Mix.base]]', position: { start: { line: 0, col: 0, offset: -1 }, end: { line: 0, col: 0, offset: 1 } } }]; break;
+		}
 		const before = new Map(fake.contents);
 		const notice = vi.spyOn(noticeService, 'showNotice');
 		vi.useFakeTimers();
@@ -172,6 +211,29 @@ describe('migration gate regressions', () => {
 		expect(fake.contents).toEqual(before);
 		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
 		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: 'Playlists/Mix.md' }));
+	});
+
+	it('bootstraps a consistent public cache without changing bytes, stats or emitting an indexing event', async () => {
+		const host = await fixture(true, true);
+		const fake = state(host.app);
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing note');
+		const before = new Map(fake.contents);
+		const stat = { ...note.stat };
+		const changed = vi.fn();
+		const ref = host.app.metadataCache.on('changed', changed);
+		const cachedRead = vi.spyOn(host.app.vault, 'cachedRead');
+
+		try {
+			const snapshot = await settledMigrationMetadata(host.app, note);
+			expect(snapshot.cache).toBe(fake.cache.get(note.path));
+			expect(cachedRead).toHaveBeenCalledWith(note);
+			expect(fake.contents).toEqual(before);
+			expect(note.stat).toEqual(stat);
+			expect(changed).not.toHaveBeenCalled();
+		} finally {
+			host.app.metadataCache.offref(ref);
+		}
 	});
 
 	it.each(['```md\n![[Bases/Example.base]]\n```', '`![[Bases/Example.base]]`'])(
@@ -447,7 +509,6 @@ describe('migration gate regressions', () => {
 		const file = host.app.vault.getFileByPath('Tracks/A.md');
 		if (!file) throw new Error('Missing track');
 		const before = await host.app.vault.read(file);
-		const beforeStat = { ...file.stat };
 		const entered = signal<void>();
 		const release = signal<void>();
 		const written = signal<void>();
@@ -462,7 +523,7 @@ describe('migration gate regressions', () => {
 		await entered.promise;
 		const indexedFile = fake.files.get(file.path);
 		if (!indexedFile) throw new Error('Missing fake file');
-		fake.index(indexedFile, before, beforeStat);
+		fake.index(indexedFile, before);
 		try {
 			expect(fake.handlers.size).toBe(baseline + 1);
 		} finally {
