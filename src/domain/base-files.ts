@@ -1,5 +1,4 @@
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
-import { DEFAULT_PROPERTY_MAPPING } from './config';
 
 export const MUSIC_BASE_NAME = 'Music.base';
 export const PLAYLISTS_BASE_NAME = 'Playlists.base';
@@ -11,7 +10,7 @@ export interface CompanionBaseFile {
 
 export function buildCompanionBaseFiles(
   playlistFolder: string,
-  propertyMapping: YoutubePlaylistPropertyMapping = DEFAULT_PROPERTY_MAPPING,
+  propertyMapping: YoutubePlaylistPropertyMapping,
 ): CompanionBaseFile[] {
   const folder = getCompanionBaseFolder(playlistFolder);
 
