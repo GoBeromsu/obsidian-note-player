@@ -12,6 +12,8 @@ export interface MigrationPlaylistInput {
   readonly trackRefs: readonly unknown[];
   readonly resolvedTrackPaths: readonly (string | null)[];
   readonly embeddedBases: readonly string[];
+  readonly pendingBase?: string;
+  readonly ownedBase?: string;
 }
 
 export interface PlaylistMigrationInput {
@@ -77,8 +79,8 @@ export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMi
     const embeddedBase = note.embeddedBases[0];
     const folder = note.folder === '/' || note.folder === '' ? '' : `${note.folder}/`;
     const stem = `${folder}${note.basename}`;
-    let basePath = embeddedBase ?? `${stem}.base`;
-    if (!embeddedBase) {
+    let basePath = embeddedBase ?? note.pendingBase ?? `${stem}.base`;
+    if (!embeddedBase && !note.pendingBase) {
       let suffix = 1;
       while (reservedPaths.has(basePath)) {
         basePath = `${stem} ${suffix++}.base`;
@@ -103,7 +105,8 @@ export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMi
     playlists.push({
       notePath: note.path,
       basePath,
-      createBase: embeddedBase === undefined,
+      createBase: embeddedBase === undefined && note.pendingBase === undefined
+        || note.ownedBase !== undefined && !input.existingPaths.has(note.ownedBase),
       appendEmbed: embeddedBase === undefined,
       membershipAdds: [...membershipAdds],
       renameLegacyKey,

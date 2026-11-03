@@ -1,6 +1,10 @@
 export const NOTICE_CATALOG = {
 	library_refreshed: { template: 'Refreshed {{tracks}} across {{playlists}}.' },
 	bases_refreshed: { template: 'Refreshed {{files}} in {{folder}}.' },
+	migration_already_bases: { template: 'All playlists already use Bases.' },
+	migration_progress: { template: 'Converting {{name}}...' },
+	migration_complete: { template: 'Converted {{playlists}} playlists, linked {{tracks}} tracks, {{missing}} missing.' },
+	migration_failed: { template: 'Could not convert {{name}}: {{reason}}' },
 	playlist_created: { template: 'Created playlist {{name}}.' },
 	playlist_loaded: { template: 'Loaded playlist {{name}}.' },
 	track_added: { template: 'Added {{title}} to {{playlist}}.' },

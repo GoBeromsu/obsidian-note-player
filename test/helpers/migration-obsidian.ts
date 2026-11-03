@@ -1,0 +1,263 @@
+import type { Pos } from 'obsidian';
+
+type Cache = {
+	frontmatter: Record<string, unknown>;
+	frontmatterPosition?: Pos;
+	sections?: { type: string; position: Pos }[];
+	embeds: { link: string; original: string; position: Pos }[];
+	frontmatterLinks?: { key: string; link: string; original: string }[];
+};
+type Changed = (file: TFile, data: string, cache: Cache) => void;
+const eventCleanup = new WeakMap<object, () => void>();
+
+export class Component {
+	private loaded = false;
+	private readonly children = new Set<Component>();
+	private readonly cleanup: (() => void)[] = [];
+	load(): void {
+		if (this.loaded) return;
+		this.loaded = true;
+		for (const child of this.children) child.load();
+	}
+	unload(): void {
+		if (!this.loaded) return;
+		this.loaded = false;
+		for (const child of this.children) child.unload();
+		for (const callback of this.cleanup.splice(0).reverse()) callback();
+	}
+	addChild<T extends Component>(child: T): T {
+		this.children.add(child);
+		if (this.loaded) child.load();
+		return child;
+	}
+	removeChild<T extends Component>(child: T): T {
+		this.children.delete(child);
+		child.unload();
+		return child;
+	}
+	register(callback: () => void): void { this.cleanup.push(callback); }
+	registerEvent(ref: object): void { this.register(() => eventCleanup.get(ref)?.()); }
+}
+
+const frontmatter = (content: string): Record<string, unknown> => JSON.parse(content.split('\n')[1] ?? '{}');
+const body = (content: string) => content.split('\n').slice(3).join('\n');
+
+function position(content: string, start: number, end: number): Pos {
+	const loc = (offset: number) => ({
+		offset, line: content.slice(0, offset).split('\n').length - 1,
+		col: offset - content.lastIndexOf('\n', offset - 1) - 1,
+	});
+	return { start: loc(start), end: loc(end) };
+}
+
+export class TFile {
+	readonly extension: string;
+	readonly basename: string;
+	readonly parent: { path: string };
+	readonly stat = { ctime: 0, mtime: 0, size: 0 };
+	constructor(readonly path: string) {
+		this.extension = path.split('.').at(-1) ?? '';
+		this.basename = path.split('/').at(-1)?.replace(/\.[^.]+$/, '') ?? '';
+		this.parent = { path: path.split('/').slice(0, -1).join('/') };
+	}
+}
+
+export class TFolder {
+	constructor(readonly path: string, readonly children: readonly TFile[]) {}
+	isRoot(): boolean { return this.path === '/'; }
+}
+
+function cacheFor(content: string): Cache {
+	const embeds: Cache['embeds'] = [];
+	let fenced = false;
+	let offset = content.indexOf('\n---\n') + 5;
+	for (const line of body(content).split('\n')) {
+		const lineOffset = offset;
+		offset += line.length + 1;
+		if (line.startsWith('```') || line.startsWith('~~~')) {
+			fenced = !fenced;
+			continue;
+		}
+		if (fenced) continue;
+		let partOffset = 0;
+		for (const [index, part] of line.split('`').entries()) {
+			if (!(index % 2)) for (const match of part.matchAll(/!\[\[([^\]]+)\]\]/g)) {
+				const start = lineOffset + partOffset + match.index;
+				embeds.push({ link: match[1] ?? '', original: match[0], position: position(content, start, start + match[0].length) });
+			}
+			partOffset += part.length + 1;
+		}
+	}
+	const end = content.indexOf('\n---\n') + 4;
+	const frontmatterPosition = position(content, 0, end);
+	const sections = [{ type: 'yaml', position: frontmatterPosition }];
+	if (content.trimEnd().length > end + 1) {
+		sections.push({ type: 'paragraph', position: position(content, end + 1, content.trimEnd().length) });
+	}
+	const fm = frontmatter(content);
+	const frontmatterLinks = Object.entries(fm).flatMap(([key, raw]) =>
+		(Array.isArray(raw) ? raw : [raw]).flatMap((value, index) => typeof value === 'string'
+			? [...value.matchAll(/\[\[([^\]]+)\]\]/g)].map((match) => ({
+				key: `${key}.${index}`, link: match[1]?.split('|')[0] ?? '', original: match[0],
+			})) : []));
+	return { frontmatter: fm, embeds, frontmatterPosition, sections, frontmatterLinks };
+}
+
+export const notices: string[] = [];
+export class Notice {
+	constructor(message: string = '') { if (message) notices.push(message); }
+	setMessage() {}
+	hide() {}
+}
+
+const apps = new WeakMap<object, App>();
+export function state(app: object): App {
+	const value = apps.get(app);
+	if (!value) throw new Error('Missing fake app');
+	return value;
+}
+
+export class App {
+	readonly files = new Map<string, TFile>();
+	readonly contents = new Map<string, string>();
+	readonly cache = new Map<string, Cache>();
+	readonly parsedBodies = new Map<string, readonly string[]>();
+	readonly handlers = new Set<Changed>();
+	readonly resolvedHandlers = new Set<() => void>();
+	readonly modifyHandlers = new Set<(file: TFile) => void>();
+	readonly pending: { file: TFile; data: string }[] = [];
+	asyncIndexing = false;
+	initiallyResolved = false;
+	pauseIndexing = false;
+	onWrite: (file: TFile) => void = () => {};
+	onSubscribe: (name: string) => void = () => {};
+	constructor() {
+		apps.set(this, this);
+		Object.defineProperty(this.metadataCache, 'resolvedLinks', { get: () => Object.fromEntries(
+			[...this.cache].map(([path, cache]) => [path, Object.fromEntries((cache.frontmatterLinks ?? []).flatMap((link) => {
+				const target = this.metadataCache.getFirstLinkpathDest(link.link);
+				return target ? [[target.path, 1]] : [];
+			}))]),
+		) });
+	}
+
+	index(file: TFile, data: string): void {
+		if (file.extension !== 'md') return;
+		const cache = cacheFor(data);
+		const parsed = this.parsedBodies.get(body(data));
+		if (parsed) {
+			const seen = new Map<string, number>();
+			cache.embeds = parsed.map((link) => {
+				const choices = [...data.matchAll(/!\[\[([^\]]+)\]\]/g)].filter((match) => match[1] === link);
+				const index = seen.get(link) ?? 0;
+				seen.set(link, index + 1);
+				const match = choices[choices.length - parsed.filter((value) => value === link).length + index];
+				if (!match) throw new Error('Missing canned embed fixture');
+				return { link, original: match[0], position: position(data, match.index, match.index + match[0].length) };
+			});
+		}
+		this.cache.set(file.path, cache);
+		for (const handler of this.handlers) handler(file, data, cache);
+	}
+
+	flush(): void {
+		for (const { file, data } of this.pending.splice(0)) this.index(file, data);
+	}
+
+	resolve(): void {
+		this.flush();
+		this.initiallyResolved = true;
+		for (const handler of this.resolvedHandlers) handler();
+	}
+
+	private write(file: TFile, data: string): void {
+		this.contents.set(file.path, data);
+		file.stat.mtime++;
+		file.stat.size = new TextEncoder().encode(data).byteLength;
+		for (const handler of this.modifyHandlers) handler(file);
+		if (this.pauseIndexing) this.pending.push({ file, data });
+		else {
+			const index = () => {
+				this.index(file, data);
+				if (this.initiallyResolved) for (const handler of this.resolvedHandlers) handler();
+			};
+			if (this.asyncIndexing) queueMicrotask(index);
+			else index();
+		}
+		this.onWrite(file);
+	}
+
+	readonly vault = {
+		on: (_name: 'modify', callback: (file: TFile) => void) => {
+			this.modifyHandlers.add(callback);
+			return { callback };
+		},
+		offref: (ref: { callback: (file: TFile) => void }) => { this.modifyHandlers.delete(ref.callback); },
+		getMarkdownFiles: () => [...this.files.values()].filter((file) => file.extension === 'md'),
+		getAllLoadedFiles: () => [...this.files.values()],
+		getFolderByPath: (path: string) => new TFolder(path, [...this.files.values()].filter((file) => file.parent.path === path)),
+		getFileByPath: (path: string) => this.files.get(path) ?? null,
+		getAbstractFileByPath: (path: string) => this.files.get(path) ?? null,
+		read: (file: TFile) => Promise.resolve(this.contents.get(file.path) ?? ''),
+		cachedRead: (file: TFile) => Promise.resolve(this.contents.get(file.path) ?? ''),
+		create: (path: string, content: string) => {
+			if (this.files.has(path)) return Promise.reject(new Error('File exists'));
+			const file = new TFile(path);
+			this.files.set(path, file);
+			this.write(file, content);
+			return Promise.resolve(file);
+		},
+		process: (file: TFile, edit: (content: string) => string) => {
+			const content = edit(this.contents.get(file.path) ?? '');
+			this.write(file, content);
+			return Promise.resolve(content);
+		},
+	};
+
+	readonly metadataCache = new Proxy({
+		getFileCache: (file: TFile) => this.cache.get(file.path) ?? null,
+		getFirstLinkpathDest: (link: string) => {
+			const path = link.replace(/\.md$/, '');
+			return this.files.get(link) ?? this.files.get(`${path}.md`) ?? null;
+		},
+		on: (...[name, callback]: ['changed', Changed] | ['resolved', () => void]) => {
+			if (name === 'changed') this.handlers.add(callback);
+			else this.resolvedHandlers.add(callback);
+			this.onSubscribe(name);
+			const ref = { callback };
+			eventCleanup.set(ref, () => this.metadataCache.offref(ref));
+			return ref;
+		},
+		offref: (ref: { callback: Changed | (() => void) }) => {
+			for (const handler of this.handlers) if (handler === ref.callback) this.handlers.delete(handler);
+			for (const handler of this.resolvedHandlers) if (handler === ref.callback) this.resolvedHandlers.delete(handler);
+		},
+	}, {
+		get(target, property, receiver) {
+			if (!Reflect.has(target, property)) throw new Error(`Non-public metadata member: ${String(property)}`);
+			return Reflect.get(target, property, receiver);
+		},
+	});
+
+	readonly fileManager = {
+		processFrontMatter: (file: TFile, edit: (fm: Record<string, unknown>) => void) => {
+			const content = this.contents.get(file.path) ?? '';
+			const fm = frontmatter(content);
+			edit(fm);
+			this.write(file, `---\n${JSON.stringify(fm)}\n---\n${body(content)}`);
+			return Promise.resolve();
+		},
+	};
+}
+
+export const getFrontMatterInfo = (content: string) => ({
+	exists: content.startsWith('---\n'), frontmatter: content.split('\n')[1] ?? '{}',
+	from: 4, to: content.indexOf('\n---\n') + 1,
+	contentStart: content.indexOf('\n---\n') + 5,
+});
+export const parseYaml = (value: string): unknown => JSON.parse(value);
+export const stringifyYaml = (value: unknown): string => JSON.stringify(value) + '\n';
+export const parseLinktext = (value: string) => ({
+	path: value.split('#')[0] ?? '', subpath: value.includes('#') ? value.slice(value.indexOf('#')) : '',
+});
+export const normalizePath = (path: string): string => path.replace(/^\/|\/$/g, '');

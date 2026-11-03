@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from 'obsidian';
+import { App, Component } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { PlaylistService } from '../src/services/playlist-service';
+import type { VaultWriteHost } from '../src/services/vault-io';
 import type { MusicLibrarySnapshot } from '../src/types/music';
 
 const disk = vi.hoisted(() => ({
@@ -10,7 +11,8 @@ const disk = vi.hoisted(() => ({
   writes: new Map<string, { entered(): void; wait: Promise<void> }>(),
 }));
 
-vi.mock('obsidian', () => ({
+vi.mock('obsidian', async () => ({
+  Component: (await import('./helpers/migration-obsidian')).Component,
   App: class {
     vault = {
       getAbstractFileByPath: (path: string) => disk.files.has(path) ? { path } : null,
@@ -31,7 +33,7 @@ vi.mock('obsidian', () => ({
 vi.mock('../src/services/vault-io', () => ({
   ensureFolder: () => Promise.resolve(),
   waitForMetadata: () => Promise.resolve(),
-  updateFrontmatter: async (_app: App, path: string, edit: (fm: Record<string, unknown>) => void) => {
+  updateFrontmatter: async (_host: VaultWriteHost, path: string, edit: (fm: Record<string, unknown>) => void) => {
     const fm = disk.notes.get(path);
     if (!fm) throw new Error(`Missing fixture: ${path}`);
     const blocked = disk.writes.get(path);
@@ -51,7 +53,7 @@ function setup() {
   };
   const selected: string[] = [];
   const service = new PlaylistService({
-    app: new App(), getSettings: () => ({ ...DEFAULT_SETTINGS, playlistFolder: 'Lists' }),
+    app: new App(), owner: new Component(), getSettings: () => ({ ...DEFAULT_SETTINGS, playlistFolder: 'Lists' }),
     getLibrary: () => library, refresh: () => Promise.resolve(),
     selectPlaylist: (path) => { selected.push(path); return Promise.resolve(); },
   });
