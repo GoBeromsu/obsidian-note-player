@@ -8,8 +8,7 @@ import {
 
 describe('buildFolderOptions', () => {
   it('offers the vault root first, then every folder sorted, never the empty path', () => {
-    const options = buildFolderOptions(['Music/Sub', 'Inbox', '', '/', 'Music', 'Inbox'], 'Inbox');
-    expect(Object.entries(options)).toEqual([
+    expect(buildFolderOptions(['Music/Sub', 'Inbox', '', '/', 'Music', 'Inbox'], 'Inbox')).toEqual([
       ['/', 'Vault root'],
       ['Inbox', 'Inbox'],
       ['Music', 'Music'],
@@ -18,8 +17,7 @@ describe('buildFolderOptions', () => {
   });
 
   it('keeps a saved folder that does not exist yet selectable and labelled', () => {
-    const options = buildFolderOptions(['Inbox'], '90. System/Playlists');
-    expect(Object.entries(options)).toEqual([
+    expect(buildFolderOptions(['Inbox'], '90. System/Playlists')).toEqual([
       ['/', 'Vault root'],
       ['90. System/Playlists', '90. System/Playlists · will be created'],
       ['Inbox', 'Inbox'],
@@ -27,16 +25,38 @@ describe('buildFolderOptions', () => {
   });
 
   it('labels the legacy empty value only while it is the saved value', () => {
-    expect(Object.entries(buildFolderOptions(['Inbox'], ''))).toEqual([
+    expect(buildFolderOptions(['Inbox'], '')).toEqual([
       ['/', 'Vault root'],
       ['', 'Default location (legacy)'],
       ['Inbox', 'Inbox'],
     ]);
-    expect(Object.keys(buildFolderOptions(['Inbox'], 'Inbox'))).toEqual(['/', 'Inbox']);
+    expect(buildFolderOptions(['Inbox'], 'Inbox').map(([value]) => value)).toEqual(['/', 'Inbox']);
   });
 
   it('adds nothing for the saved vault root', () => {
-    expect(Object.keys(buildFolderOptions(['Inbox'], '/'))).toEqual(['/', 'Inbox']);
+    expect(buildFolderOptions(['Inbox'], '/').map(([value]) => value)).toEqual(['/', 'Inbox']);
+  });
+
+  it('keeps the vault root first and plain localeCompare order for integer-like folder names', () => {
+    expect(buildFolderOptions(['a', '2024', '10', '2'], '/')).toEqual([
+      ['/', 'Vault root'],
+      ['10', '10'],
+      ['2', '2'],
+      ['2024', '2024'],
+      ['a', 'a'],
+    ]);
+  });
+
+  it('offers a folder named __proto__ like any other, including as the saved value', () => {
+    expect(buildFolderOptions(['__proto__', 'Inbox'], '__proto__')).toEqual([
+      ['/', 'Vault root'],
+      ['__proto__', '__proto__'],
+      ['Inbox', 'Inbox'],
+    ]);
+    expect(buildFolderOptions([], '__proto__')).toEqual([
+      ['/', 'Vault root'],
+      ['__proto__', '__proto__ · will be created'],
+    ]);
   });
 });
 

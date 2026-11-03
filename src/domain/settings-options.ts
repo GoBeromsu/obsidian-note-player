@@ -7,17 +7,20 @@ const PENDING_FOLDER_SUFFIX = ' · will be created';
 
 type FrontmatterLike = Record<string, unknown> | undefined;
 
+export type FolderOption = readonly [value: string, label: string];
+
 const byLocale = (a: string, b: string): number => a.localeCompare(b);
 
-// The saved value is always selectable so the control never shows blank: a not-yet-created folder is
-// labelled as such, and the legacy '' (pre-migration "default location") appears only while it is saved.
-export function buildFolderOptions(folderPaths: readonly string[], current: string): Record<string, string> {
+// Ordered pairs, not an object: object keys would hoist integer-like names ("2024") ahead of the root and
+// swallow "__proto__". The saved value is always selectable so the control never shows blank: a not-yet-created
+// folder is labelled as such, and the legacy '' (pre-migration "default location") appears only while it is saved.
+export function buildFolderOptions(folderPaths: readonly string[], current: string): FolderOption[] {
 	const existing = new Set(folderPaths.filter((path) => path !== '' && path !== VAULT_ROOT));
 	const pending = current !== '' && current !== VAULT_ROOT && !existing.has(current) ? current : null;
 	const paths = [...existing, ...(pending === null ? [] : [pending])].sort(byLocale);
-	const options: Record<string, string> = { [VAULT_ROOT]: VAULT_ROOT_LABEL };
-	if (current === '') options[''] = LEGACY_FOLDER_LABEL;
-	for (const path of paths) options[path] = path === pending ? `${path}${PENDING_FOLDER_SUFFIX}` : path;
+	const options: FolderOption[] = [[VAULT_ROOT, VAULT_ROOT_LABEL]];
+	if (current === '') options.push(['', LEGACY_FOLDER_LABEL]);
+	for (const path of paths) options.push([path, path === pending ? `${path}${PENDING_FOLDER_SUFFIX}` : path]);
 	return options;
 }
 

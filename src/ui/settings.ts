@@ -3,13 +3,11 @@ import {
 	debounce,
 	Plugin,
 	PluginSettingTab,
-	TFolder,
 	type ButtonComponent,
 	type ExtraButtonComponent,
 	type Setting,
 	type SettingDefinitionItem,
 	type SettingDefinitionRender,
-	type TAbstractFile,
 } from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/config';
 import { buildFolderOptions } from '../domain/settings-options';
@@ -45,16 +43,6 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 
 	constructor(app: App, private readonly host: SettingsHost) {
 		super(app, host);
-		// Obsidian renders the definitions cached by update(), so folder changes must refresh the dropdown options.
-		const refreshDefinitions = debounce(() => this.update(), 250, true);
-		const onFolderChange = (file: TAbstractFile) => {
-			if (file instanceof TFolder) refreshDefinitions();
-		};
-		app.workspace.onLayoutReady(() => {
-			host.registerEvent(app.vault.on('create', onFolderChange));
-			host.registerEvent(app.vault.on('delete', onFolderChange));
-			host.registerEvent(app.vault.on('rename', onFolderChange));
-		});
 	}
 
 	getControlValue(key: string): unknown {
@@ -82,8 +70,6 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
-		const folderPaths = this.app.vault.getAllFolders(false).map((folder) => folder.path);
-		const folderOptions = (key: FolderKey) => buildFolderOptions(folderPaths, this.host.settings[key]);
 		const property: Picker = {
 			tooltip: 'Choose a property',
 			open: (current, onPick) => new PropertySuggestModal(this.app, current, onPick).open(),
@@ -128,16 +114,12 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'Library',
 				items: [
-					{
-						name: 'Playlist folder',
-						desc: 'Vault folder where new playlists are created.',
-						control: { type: 'dropdown', key: 'playlistFolder', options: folderOptions('playlistFolder') },
-					},
-					{
-						name: 'Music folder',
-						desc: 'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root reads only the notes at the top level of the vault.',
-						control: { type: 'dropdown', key: 'musicFolder', options: folderOptions('musicFolder') },
-					},
+					this.folderRow('Playlist folder', 'Vault folder where new playlists are created.', 'playlistFolder'),
+					this.folderRow(
+						'Music folder',
+						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root reads only the notes at the top level of the vault.',
+						'musicFolder',
+					),
 				],
 			},
 			{
@@ -178,6 +160,22 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				],
 			},
 		];
+	}
+
+	// Rendered imperatively so the options are read from the vault on every display (Obsidian caches declarative
+	// definitions) and inserted in order (an options object would reorder integer-like folder names).
+	private folderRow(name: string, desc: string, key: FolderKey): SettingDefinitionRender {
+		return {
+			name,
+			desc,
+			render: (setting: Setting) => {
+				setting.addDropdown((dropdown) => {
+					const folders = this.app.vault.getAllFolders(false).map((folder) => folder.path);
+					for (const [value, label] of buildFolderOptions(folders, this.host.settings[key])) dropdown.addOption(value, label);
+					dropdown.setValue(this.host.settings[key]).onChange((value) => { this.setControlValue(key, value); });
+				});
+			},
+		};
 	}
 
 	private pickerRow(name: string, desc: string, key: MappingKey, picker: Picker): SettingDefinitionRender {
