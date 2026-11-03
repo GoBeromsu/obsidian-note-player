@@ -303,13 +303,13 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const path = await this.playlists.createPlaylist(name);
     await this.openPlaylist(path);
   }
-
   togglePlayback(): Promise<void> {
     if (this.viewPlaybackState === 'playing') {
       this.playerSurface?.pause();
       return Promise.resolve();
     }
-    const path = this.playback.currentTrackPath ?? this.currentQueue()[0]?.path;
+    const queue = this.selectedPlaylist()?.trackPaths ?? [];
+    const path = queue.find((path) => path === this.playback.currentTrackPath) ?? queue[0];
     if (!path) {
       showNotice('playlist_missing');
       return Promise.resolve();

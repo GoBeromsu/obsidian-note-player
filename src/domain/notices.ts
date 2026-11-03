@@ -1,9 +1,11 @@
+import { plural } from '../utils/plural';
+
 export const NOTICE_CATALOG = {
 	library_refreshed: { template: 'Refreshed {{tracks}} across {{playlists}}.' },
 	bases_refreshed: { template: 'Refreshed {{files}} in {{folder}}.' },
 	migration_already_bases: { template: 'All playlists already use Bases.' },
 	migration_progress: { template: 'Converting {{name}}...' },
-	migration_complete: { template: 'Converted {{playlists}} playlists, linked {{tracks}} tracks, {{missing}} missing.' },
+	migration_complete: { template: 'Converted {{playlists:playlist}}, linked {{tracks:track}}, {{missing}} missing.' },
 	migration_failed: { template: 'Could not convert {{name}}: {{reason}}' },
 	playlist_created: { template: 'Created playlist {{name}}.' },
 	playlist_loaded: { template: 'Loaded playlist {{name}}.' },
@@ -44,6 +46,9 @@ export function noticeDuration(id: NoticeId): number | undefined {
 }
 
 export function renderNotice(template: string, params: Record<string, string | number> = {}): string {
-	const text = template.replace(/{{\s*([\w.-]+)\s*}}/g, (_match, key: string) => String(params[key] ?? ''));
+	const text = template.replace(/{{\s*([\w.-]+)(?::([\w ]+))?\s*}}/g, (_match, key: string, noun: string | undefined) => {
+		const value = params[key] ?? '';
+		return noun && typeof value === 'number' ? plural(value, noun.trim()) : String(value);
+	});
 	return text;
 }

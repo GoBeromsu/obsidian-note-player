@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { App, Component } from 'obsidian';
+import { App, Component, Notice } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { PlaylistService } from '../src/services/playlist-service';
 import type { VaultWriteHost } from '../src/services/vault-io';
@@ -26,7 +26,7 @@ vi.mock('obsidian', async () => ({
     };
   },
   TFile: class {},
-  Notice: class {},
+  Notice: vi.fn(),
 }));
 
 // The real Obsidian frontmatter writer is exercised in the dev vault; this boundary stores the edits.
@@ -72,6 +72,15 @@ function deferred() {
 }
 
 describe('playlist membership writes', () => {
+  it('uses the basename when adding a track outside the library', async () => {
+    const { service } = setup();
+    disk.notes.set('Elsewhere/Outside Track.md', {});
+
+    await service.addTracks('Lists/Mix.md', ['Elsewhere/Outside Track.md']);
+
+    expect(Notice).toHaveBeenLastCalledWith('Added Outside Track to Mix.', 3500);
+  });
+
   it('creates a unique base and companion without writing a legacy track list', async () => {
     const { service, selected } = setup();
     disk.files.set('Lists/Mix.base', 'unrelated base');

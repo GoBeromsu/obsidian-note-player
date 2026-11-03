@@ -5,7 +5,7 @@ import { getPlaylistOrThrow } from '../domain/playlist-manager';
 import { trackLabel } from '../domain/track-import';
 import type { MusicLibrarySnapshot } from '../types/music';
 import type { NotePlayerSettings } from '../types/settings';
-import { parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
+import { linkDisplayText, parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
 import { showNotice } from '../ui/notices';
 import { ensureFolder, updateFrontmatter, waitForMetadata } from './vault-io';
 
@@ -83,7 +83,7 @@ export class PlaylistService {
         if (edit.notify) {
           const track = library.tracks.find((entry) => entry.path === path);
           showNotice(edit.add ? 'track_added' : 'track_removed', {
-            title: track ? trackLabel(track, true) : path, playlist: playlist.title,
+            title: track ? trackLabel(track, true) : linkDisplayText(path, true), playlist: playlist.title,
           });
         }
       }

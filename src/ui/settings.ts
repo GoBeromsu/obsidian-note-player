@@ -34,7 +34,7 @@ interface Picker {
 	open: (current: string, onPick: (value: string) => void) => void;
 }
 
-const NO_REFRESH_KEYS: readonly string[] = ['audioFormat', 'autoOpenOnStartup', 'musicFolder', 'turntableSounds'];
+const NO_REFRESH_KEYS: readonly string[] = ['audioFormat', 'autoOpenOnStartup', 'turntableSounds'];
 const TURNTABLE_STYLE_OPTIONS: Record<TurntableStyle, string> = { realistic: 'Realistic', minimal: 'Minimal' };
 const AUDIO_FORMAT_OPTIONS: Record<AudioFormat, string> = { mp3: 'MP3', wav: 'WAV', opus: 'OPUS', aac: 'AAC' };
 // Must match the key hasType (utils/frontmatter) reads.
@@ -125,10 +125,10 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'Library',
 				items: [
-					this.folderRow('Playlist folder', 'Vault folder where new playlists are created.', 'playlistFolder'),
+					this.folderRow('Playlist folder', 'Playlists are read from this folder and its subfolders, and new playlists are created here.', 'playlistFolder'),
 					this.folderRow(
 						'Music folder',
-						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root reads only the notes at the top level of the vault.',
+						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root includes all folders in the vault.',
 						'musicFolder',
 					),
 				],

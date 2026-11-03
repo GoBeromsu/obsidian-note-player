@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App, Component } from 'obsidian';
+import { App, Component, Notice } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
 import { notices, state } from './helpers/migration-obsidian';
@@ -76,6 +76,37 @@ afterEach(() => {
 });
 
 describe('playlist migration service', () => {
+	it('shows the playlist basename during conversion', async () => {
+		const messages: string[] = [];
+		vi.spyOn(Notice.prototype, 'setMessage').mockImplementation(function (this: Notice, message) {
+			messages.push(typeof message === 'string' ? message : message.textContent ?? '');
+			return this;
+		});
+		const host = await fixture();
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(messages).toEqual(['Converting Mix...']);
+	});
+
+	it.each([1, 2])('pluralizes converted playlists and linked tracks for count %i', async (count) => {
+		const host = await fixture();
+		if (count === 2) {
+			await seed(host.app, 'Playlists/Next.md', { type: 'music-playlist', songs: ['[[Tracks/B]]'] });
+			await seed(host.app, 'Tracks/B.md', { type: 'music' });
+		}
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notices.at(-1)).toBe(count === 1
+			? 'Converted 1 playlist, linked 1 track, 1 missing.'
+			: 'Converted 2 playlists, linked 2 tracks, 1 missing.');
+	});
+
 	it('waits for byte-matched post-write indexing and cleans temporary listeners', async () => {
 		const host = await fixture();
 		const fake = state(host.app);

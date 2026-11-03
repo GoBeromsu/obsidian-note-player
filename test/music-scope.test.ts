@@ -17,14 +17,17 @@ function tree(links: Record<string, string[]> = {}): ScopeTree<string, string> {
 }
 
 describe('collectScopedFiles', () => {
-	it('reads only direct children of the vault root', () => {
+	it('reads all descendants of the vault root', () => {
 		const files = collectScopedFiles([{ folder: '/', isVaultRoot: true }], tree());
-		expect(files).toEqual(['Root track.md', 'Road Trip.md']);
+		expect(files).toEqual([
+			'Root track.md', 'Road Trip.md', 'Deep/Nested track.md', 'Deep/Linked track.md',
+			'Music/A.md', 'Music/Sub/B.md',
+		]);
 	});
 
 	it('adds notes a collected playlist links to, even outside the scope', () => {
-		const files = collectScopedFiles([{ folder: '/', isVaultRoot: true }], tree({ 'Road Trip.md': ['Deep/Linked track.md'] }));
-		expect(files).toContain('Deep/Linked track.md');
+		const files = collectScopedFiles([{ folder: 'Music', isVaultRoot: false }], tree({ 'Music/A.md': ['Deep/Linked track.md'] }));
+		expect(files).toEqual(['Music/A.md', 'Music/Sub/B.md', 'Deep/Linked track.md']);
 		expect(files).not.toContain('Deep/Nested track.md');
 	});
 
