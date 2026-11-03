@@ -24,6 +24,10 @@ vi.mock('../src/ui/views/NotePlayerView', () => ({
   VIEW_TYPE_NOTE_PLAYER: 'obsidian-note-player-view',
   VIEW_TYPE_LEGACY: 'youtube-note-playlist-view',
 }));
+vi.mock('../src/ui/views/PlaylistBasesView', () => ({
+  PlaylistBasesView: class {},
+  PLAYLIST_BASES_VIEW_TYPE: 'note-player',
+}));
 
 interface Deferred<T> {
   readonly promise: Promise<T>;

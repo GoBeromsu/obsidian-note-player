@@ -20,6 +20,7 @@ import { showNotice } from './ui/notices';
 import type { PlaybackState } from './types/playback';
 import { NotePlayerSettingsTab } from './ui/settings';
 import { VIEW_TYPE_NOTE_PLAYER, VIEW_TYPE_LEGACY, NotePlayerView } from './ui/views/NotePlayerView';
+import { PLAYLIST_BASES_VIEW_TYPE, PlaylistBasesView } from './ui/views/PlaylistBasesView';
 import type { PlayerSurface } from './ui/views/PlayerSurface';
 import type { DownloadStatusBar } from './ui/download-status-bar';
 import { createPlayer } from './ui/player-setup';
@@ -116,6 +117,12 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const createView = (leaf: WorkspaceLeaf) => new NotePlayerView(leaf, this, this.playerSurface!, this.playerHostEl!, this.volume!);
     this.registerView(VIEW_TYPE_NOTE_PLAYER, createView);
     this.registerView(VIEW_TYPE_LEGACY, createView);
+    const basesViewRegistered = this.registerBasesView(PLAYLIST_BASES_VIEW_TYPE, {
+      name: 'Note Player',
+      icon: 'play-square',
+      factory: (controller, containerEl) => new PlaylistBasesView(controller, containerEl, this),
+    });
+    if (!basesViewRegistered) console.warn('[Note Player] Bases is disabled in this vault; playlist notes will not show the player view.');
 
     this.addRibbonIcon('play-square', 'Open note player', () => {
       void this.activateView();
