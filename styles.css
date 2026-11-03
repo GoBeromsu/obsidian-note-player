@@ -798,8 +798,98 @@
 	display: none;
 }
 
-.onp-setting-input-full {
-	width: 100%;
+/* Settings: a picker is a button wearing Obsidian's .dropdown class. Obsidian's `button:not(.clickable-icon)` rule
+   outranks `.dropdown`, so the dropdown tokens are restated here; the fixed width keeps the reset icons in one column. */
+.onp-picker-setting .onp-picker-button {
+	display: inline-block;
+	width: 11em;
+	overflow: hidden;
+	line-height: var(--input-height);
+	color: var(--text-normal);
+	background-color: var(--dropdown-background);
+	box-shadow: var(--input-shadow);
+	text-align: end;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+@media (hover: hover) {
+	.onp-picker-setting .onp-picker-button:hover {
+		background-color: var(--dropdown-background-hover);
+		box-shadow: var(--input-shadow-hover);
+	}
+}
+
+.onp-picker-setting .onp-picker-button:focus-visible {
+	box-shadow: 0 0 0 3px var(--background-modifier-border-focus);
+	outline: none;
+}
+
+.onp-picker-setting .extra-setting-button.is-disabled,
+.onp-picker-setting .extra-setting-button.is-disabled:hover {
+	background-color: transparent;
+	color: var(--text-faint);
+	cursor: default;
+}
+
+.onp-picker-button.is-changed {
+	animation: onp-picker-settle var(--anim-duration-moderate) var(--anim-motion-smooth);
+}
+
+@keyframes onp-picker-settle {
+	0% {
+		background-color: color-mix(in oklab, var(--interactive-accent) 36%, var(--dropdown-background));
+		scale: 1.04;
+	}
+	100% {
+		background-color: var(--dropdown-background);
+		scale: 1;
+	}
+}
+
+@keyframes onp-picker-settle-still {
+	0% { background-color: color-mix(in oklab, var(--interactive-accent) 36%, var(--dropdown-background)); }
+	100% { background-color: var(--dropdown-background); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.onp-picker-button.is-changed {
+		animation-name: onp-picker-settle-still;
+	}
+}
+
+/* Picker modal rows keep a fixed icon slot so labels align whether or not a row carries a mark. */
+.onp-picker-modal .onp-picker-item {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+}
+
+.onp-picker-modal .onp-picker-icon {
+	--icon-size: var(--icon-s);
+	--icon-stroke: var(--icon-s-stroke-width);
+	display: flex;
+	flex: none;
+	width: var(--icon-s);
+	height: var(--icon-s);
+	color: var(--text-muted);
+}
+
+.onp-picker-modal .onp-picker-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.onp-picker-modal .onp-picker-item.is-current .onp-picker-label {
+	font-weight: var(--font-semibold);
+}
+
+.onp-picker-modal .onp-picker-item.is-current .onp-picker-icon,
+.onp-picker-modal .onp-picker-item.is-create .onp-picker-icon,
+.onp-picker-modal .onp-picker-item.is-create .onp-picker-label {
+	color: var(--text-accent);
 }
 
 /* Turntable: a walnut deck lit by one warm key light from the upper left. */

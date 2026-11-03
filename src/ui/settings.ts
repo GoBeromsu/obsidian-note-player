@@ -1,16 +1,19 @@
 import {
-	AbstractInputSuggest,
 	App,
 	debounce,
 	Plugin,
 	PluginSettingTab,
+	type ButtonComponent,
+	type ExtraButtonComponent,
 	type Setting,
 	type SettingDefinitionItem,
+	type SettingDefinitionRender,
 } from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/config';
-import { collectMusicFiles } from '../services/vault-io';
+import { buildFolderOptions } from '../domain/settings-options';
 import type { AudioFormat } from '../types/audio';
 import type { NotePlayerSettings, TurntableStyle } from '../types/settings';
+import { PropertySuggestModal, ValueSuggestModal } from './views/PropertySuggestModal';
 
 interface SettingsHost extends Plugin {
 	settings: NotePlayerSettings;
@@ -19,47 +22,19 @@ interface SettingsHost extends Plugin {
 	refreshCompanionBases(): Promise<void>;
 }
 
+type MappingKey = keyof typeof DEFAULT_PROPERTY_MAPPING;
+type FolderKey = 'playlistFolder' | 'musicFolder';
+
+interface Picker {
+	tooltip: string;
+	open: (current: string, onPick: (value: string) => void) => void;
+}
+
 const NO_REFRESH_KEYS: readonly string[] = ['audioFormat', 'autoOpenOnStartup', 'musicFolder', 'turntableSounds'];
 const TURNTABLE_STYLE_OPTIONS: Record<TurntableStyle, string> = { realistic: 'Realistic', minimal: 'Minimal' };
 const AUDIO_FORMAT_OPTIONS: Record<AudioFormat, string> = { mp3: 'MP3', wav: 'WAV', opus: 'OPUS', aac: 'AAC' };
-
-function collectVaultProperties(app: App, musicFolder: string): string[] {
-	const properties = new Set<string>();
-	for (const file of collectMusicFiles(app, [musicFolder])) {
-		const cache = app.metadataCache.getFileCache(file);
-		if (cache?.frontmatter) {
-			for (const key of Object.keys(cache.frontmatter)) {
-				if (key !== 'position') properties.add(key);
-			}
-		}
-	}
-	return [...properties].sort();
-}
-
-class PropertySuggest extends AbstractInputSuggest<string> {
-	constructor(
-		app: App,
-		private readonly inputEl: HTMLInputElement,
-		private readonly getMusicFolder: () => string,
-	) {
-		super(app, inputEl);
-	}
-
-	getSuggestions(query: string): string[] {
-		const token = query.trim().toLowerCase();
-		return collectVaultProperties(this.app, this.getMusicFolder()).filter((p) => p.toLowerCase().includes(token));
-	}
-
-	renderSuggestion(value: string, el: HTMLElement): void {
-		el.setText(value);
-	}
-
-	selectSuggestion(value: string): void {
-		this.inputEl.value = value;
-		this.inputEl.dispatchEvent(new Event('input'));
-		this.close();
-	}
-}
+// Must match the key hasType (utils/frontmatter) reads.
+const TYPE_PROPERTY = 'type';
 
 export class NotePlayerSettingsTab extends PluginSettingTab {
 	private refreshPending = false;
@@ -95,6 +70,14 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
+		const property: Picker = {
+			tooltip: 'Choose a property',
+			open: (current, onPick) => new PropertySuggestModal(this.app, current, onPick).open(),
+		};
+		const typeValue: Picker = {
+			tooltip: 'Choose a type value',
+			open: (current, onPick) => new ValueSuggestModal(this.app, TYPE_PROPERTY, current, onPick).open(),
+		};
 		return [
 			{
 				type: 'group',
@@ -131,44 +114,32 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'Library',
 				items: [
-				{
-					name: 'Playlist folder',
-					desc: 'Vault folder where new playlist notes are created.',
-					control: { type: 'folder', key: 'playlistFolder', placeholder: '90. System/playlists' },
-				},
-				{
-					name: 'Music folder',
-					desc: 'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus playlists in the playlist folder. With no folder set, only notes at the vault root and tracks linked from playlists are listed.',
-					control: { type: 'folder', key: 'musicFolder', placeholder: 'Default location' },
-				},
+					this.folderRow('Playlist folder', 'Vault folder where new playlists are created.', 'playlistFolder'),
+					this.folderRow(
+						'Music folder',
+						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root reads only the notes at the top level of the vault.',
+						'musicFolder',
+					),
 				],
 			},
 			{
 				type: 'group',
-				heading: 'Music note mapping',
+				heading: 'Track properties',
 				items: [
-					this.propertyRow('URL property', 'Frontmatter key used for the YouTube URL.', 'musicUrlProperty'),
-					this.propertyRow('Thumbnail property', 'Frontmatter key used for music-note artwork.', 'musicThumbnailProperty'),
-					this.propertyRow('Artist property', 'Frontmatter key used for artist or author metadata.', 'musicArtistProperty'),
+					this.pickerRow('URL property', 'Frontmatter key used for the YouTube URL.', 'musicUrlProperty', property),
+					this.pickerRow('Thumbnail property', 'Frontmatter key that receives the video thumbnail when a track is imported.', 'musicThumbnailProperty', property),
+					this.pickerRow('Artist property', 'Frontmatter key used for artist or author metadata.', 'musicArtistProperty', property),
 				],
 			},
 			{
 				type: 'group',
-				heading: 'Playlist note schema',
+				heading: 'Playlist properties',
 				items: [
-					this.propertyRow('Membership property', 'Frontmatter key for playlist membership links.', 'playlistMembershipProperty'),
-					this.propertyRow('Description property', 'Frontmatter key used for playlist description text.', 'playlistDescriptionProperty'),
-					this.propertyRow('Cover property', 'Frontmatter key used for playlist cover artwork.', 'playlistCoverProperty'),
-					{
-						name: 'Music note type',
-						desc: 'The frontmatter type value used to identify music notes.',
-						control: { type: 'text', key: 'musicNoteType', placeholder: DEFAULT_PROPERTY_MAPPING.musicNoteType },
-					},
-					{
-						name: 'Playlist note type',
-						desc: 'The frontmatter type value used to identify playlist notes.',
-						control: { type: 'text', key: 'playlistNoteType', placeholder: DEFAULT_PROPERTY_MAPPING.playlistNoteType },
-					},
+					this.pickerRow('Membership property', 'Frontmatter key on a track that links the playlists it belongs to.', 'playlistMembershipProperty', property),
+					this.pickerRow('Description property', 'Frontmatter key used for playlist description text.', 'playlistDescriptionProperty', property),
+					this.pickerRow('Cover property', 'Frontmatter key used for playlist cover artwork.', 'playlistCoverProperty', property),
+					this.pickerRow('Music note type', 'The type value that marks a note as a music track.', 'musicNoteType', typeValue),
+					this.pickerRow('Playlist note type', 'The type value that marks a note as a playlist.', 'playlistNoteType', typeValue),
 				],
 			},
 			{
@@ -191,20 +162,60 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 		];
 	}
 
-	private propertyRow(name: string, desc: string, key: keyof typeof DEFAULT_PROPERTY_MAPPING) {
-		const placeholder = DEFAULT_PROPERTY_MAPPING[key];
+	// Rendered imperatively so the options are read from the vault on every display (Obsidian caches declarative
+	// definitions) and inserted in order (an options object would reorder integer-like folder names).
+	private folderRow(name: string, desc: string, key: FolderKey): SettingDefinitionRender {
 		return {
 			name,
 			desc,
 			render: (setting: Setting) => {
-				setting.addText((text) => {
-					text
-						.setPlaceholder(String(placeholder))
-						.setValue(String(this.getControlValue(key)))
-						.onChange((value) => { void this.setControlValue(key, value); });
-					new PropertySuggest(this.app, text.inputEl, () => this.host.settings.musicFolder);
+				setting.addDropdown((dropdown) => {
+					const folders = this.app.vault.getAllFolders(false).map((folder) => folder.path);
+					for (const [value, label] of buildFolderOptions(folders, this.host.settings[key])) dropdown.addOption(value, label);
+					dropdown.setValue(this.host.settings[key]).onChange((value) => { this.setControlValue(key, value); });
 				});
 			},
 		};
 	}
+
+	private pickerRow(name: string, desc: string, key: MappingKey, picker: Picker): SettingDefinitionRender {
+		const fallback = DEFAULT_PROPERTY_MAPPING[key];
+		return {
+			name,
+			desc: `${desc} Default: ${fallback}.`,
+			render: (setting: Setting) => {
+				const current = () => String(this.getControlValue(key));
+				let reset: ExtraButtonComponent | null = null;
+				let button: ButtonComponent | null = null;
+				const sync = () => {
+					const value = current();
+					button?.setButtonText(value);
+					reset?.setDisabled(value === fallback);
+				};
+				const apply = (value: string) => {
+					this.setControlValue(key, value);
+					sync();
+					if (button) settle(button.buttonEl);
+				};
+				setting.setClass('onp-picker-setting');
+				setting.addExtraButton((extra) => {
+					reset = extra.setIcon('rotate-ccw').setTooltip('Reset to default').onClick(() => {
+						if (current() !== fallback) apply(fallback);
+					});
+				});
+				setting.addButton((control) => {
+					button = control.setTooltip(picker.tooltip).onClick(() => picker.open(current(), apply));
+					// Obsidian styles `.dropdown` by class, so the button inherits the native select look, chevrons included.
+					control.buttonEl.addClass('dropdown', 'onp-picker-button');
+					control.buttonEl.setAttr('aria-haspopup', 'dialog');
+				});
+				sync();
+			},
+		};
+	}
+}
+
+function settle(el: HTMLElement): void {
+	el.addEventListener('animationend', () => el.removeClass('is-changed'), { once: true });
+	el.addClass('is-changed');
 }

@@ -1,4 +1,13 @@
-import { App, Plugin } from 'obsidian';
+import {
+  App,
+  Plugin,
+  type Setting,
+  type SettingDefinitionControl,
+  type SettingDefinitionItem,
+  type SettingDefinitionRender,
+  type SettingGroup,
+  type SettingGroupItem,
+} from 'obsidian';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, normalizeSettings, normalizeSettingValue } from '../src/domain/config';
 import { NotePlayerSettingsTab } from '../src/ui/settings';
@@ -6,10 +15,14 @@ import { NotePlayerSettingsTab } from '../src/ui/settings';
 vi.mock('obsidian', () => ({
   App: class {},
   Plugin: class {},
-  PluginSettingTab: class {},
-  AbstractInputSuggest: class {},
+  PluginSettingTab: class {
+    constructor(public app: unknown) {}
+  },
+  FuzzySuggestModal: class {},
+  renderResults: vi.fn(),
+  setIcon: vi.fn(),
   // The assertions concern immediate settings state, not Obsidian's deferred persistence.
-  debounce: () => Object.assign(vi.fn(), { run: vi.fn() }),
+  debounce: (fn: () => void) => Object.assign(vi.fn(fn), { run: vi.fn() }),
 }));
 
 class SettingsHostStub extends Plugin {
@@ -127,19 +140,124 @@ describe('normalizeSettings', () => {
   });
 });
 
+const manifest = {
+  id: 'note-player',
+  name: 'Note Player',
+  version: '0.8.9',
+  minAppVersion: '1.14.4',
+  description: 'Settings test',
+  author: 'Test',
+};
+
+function appWithFolders(paths: string[]): App {
+  return Object.assign(new App(), { vault: { getAllFolders: () => paths.map((path) => ({ path })) } });
+}
+
+/** Renders a folder row into a fake Setting and records what reaches the dropdown, in order. */
+function renderFolderRow(rows: Row[], name: string) {
+  const row = rows.filter(isRenderRow).find((candidate) => candidate.name === name);
+  if (!row) throw new Error(`no render row named ${name}`);
+  const added: [string, string][] = [];
+  let value = '';
+  let change: ((next: string) => unknown) | null = null;
+  const dropdown = {
+    addOption: (optionValue: string, label: string) => { added.push([optionValue, label]); return dropdown; },
+    setValue: (next: string) => { value = next; return dropdown; },
+    onChange: (cb: (next: string) => unknown) => { change = cb; return dropdown; },
+  };
+  const setting = { addDropdown: (cb: (component: typeof dropdown) => unknown) => { cb(dropdown); return setting; } };
+  row.render(setting as unknown as Setting, {} as SettingGroup);
+  return { added, value, change: (next: string) => change?.(next) };
+}
+
+type Row = SettingDefinitionItem | SettingGroupItem;
+
+function flattenDefinitions(items: SettingDefinitionItem[]): Row[] {
+  return items.flatMap((item): Row[] => ('items' in item ? item.items ?? [] : [item]));
+}
+
+const isControlRow = (row: Row): row is SettingDefinitionControl => 'control' in row && row.control !== undefined;
+const isRenderRow = (row: Row): row is SettingDefinitionRender => 'render' in row && typeof row.render === 'function';
+
+describe('settings definitions', () => {
+  const app = appWithFolders(['Music/Sub', 'Inbox', 'Music']);
+  const host = new SettingsHostStub(app, manifest);
+  host.settings = { ...DEFAULT_SETTINGS, playlistFolder: 'Inbox', musicFolder: '' };
+  const rows = flattenDefinitions(new NotePlayerSettingsTab(app, host).getSettingDefinitions());
+  const controls = rows.filter(isControlRow).map((row) => row.control);
+
+  it('fills the folder dropdowns in order from the vault root, surfacing the legacy empty value only where saved', () => {
+    const playlist = renderFolderRow(rows, 'Playlist folder');
+    expect(playlist.added).toEqual([['/', 'Vault root'], ['Inbox', 'Inbox'], ['Music', 'Music'], ['Music/Sub', 'Music/Sub']]);
+    expect(playlist.value).toBe('Inbox');
+    const music = renderFolderRow(rows, 'Music folder');
+    expect(music.added.map(([value]) => value)).toEqual(['/', '', 'Inbox', 'Music', 'Music/Sub']);
+    expect(music.added[1]).toEqual(['', 'Default location (legacy)']);
+    expect(music.value).toBe('');
+  });
+
+  it('inserts integer-like folder names after the vault root in localeCompare order', () => {
+    const numericApp = appWithFolders(['a', '2024', '10']);
+    const numericHost = new SettingsHostStub(numericApp, manifest);
+    numericHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: '/' };
+    const numericRows = flattenDefinitions(new NotePlayerSettingsTab(numericApp, numericHost).getSettingDefinitions());
+    const { added, value } = renderFolderRow(numericRows, 'Playlist folder');
+    expect(added).toEqual([['/', 'Vault root'], ['10', '10'], ['2024', '2024'], ['a', 'a']]);
+    expect(value).toBe('/');
+  });
+
+  it('offers and selects a folder named __proto__', () => {
+    const protoApp = appWithFolders(['__proto__', 'Inbox']);
+    const protoHost = new SettingsHostStub(protoApp, manifest);
+    protoHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: '__proto__' };
+    const protoRows = flattenDefinitions(new NotePlayerSettingsTab(protoApp, protoHost).getSettingDefinitions());
+    const { added, value } = renderFolderRow(protoRows, 'Playlist folder');
+    expect(added).toEqual([['/', 'Vault root'], ['__proto__', '__proto__'], ['Inbox', 'Inbox']]);
+    expect(value).toBe('__proto__');
+  });
+
+  it('persists a folder pick through the settings normalizer', () => {
+    const pickHost = new SettingsHostStub(app, manifest);
+    pickHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: 'Inbox' };
+    const pickRows = flattenDefinitions(new NotePlayerSettingsTab(app, pickHost).getSettingDefinitions());
+    renderFolderRow(pickRows, 'Playlist folder').change('Music/Sub');
+    expect(pickHost.settings.playlistFolder).toBe('Music/Sub');
+  });
+
+  it('reads the vault folders again on every render instead of caching them at definition time', () => {
+    const folders = ['Inbox'];
+    const liveApp = Object.assign(new App(), { vault: { getAllFolders: () => folders.map((path) => ({ path })) } });
+    const liveHost = new SettingsHostStub(liveApp, manifest);
+    liveHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: 'Inbox' };
+    const liveRows = flattenDefinitions(new NotePlayerSettingsTab(liveApp, liveHost).getSettingDefinitions());
+    expect(renderFolderRow(liveRows, 'Playlist folder').added.map(([value]) => value)).toEqual(['/', 'Inbox']);
+    folders.push('New');
+    expect(renderFolderRow(liveRows, 'Playlist folder').added.map(([value]) => value)).toEqual(['/', 'Inbox', 'New']);
+  });
+
+  it('renders every mapping key through a picker row instead of a text or folder control', () => {
+    expect(controls.filter((control) => control.type === 'text' || control.type === 'folder')).toEqual([]);
+    const pickerRows = rows.filter(isRenderRow).filter((row) => typeof row.desc === 'string' && row.desc.includes('Default: '));
+    expect(pickerRows.map((row) => row.name)).toEqual([
+      'URL property',
+      'Thumbnail property',
+      'Artist property',
+      'Membership property',
+      'Description property',
+      'Cover property',
+      'Music note type',
+      'Playlist note type',
+    ]);
+  });
+
+});
+
 describe('settings control value normalization', () => {
   it.each(Object.entries(defaults).flatMap(([key, expected]) =>
     ['', '  '].map((value) => ({ key, value, expected })),
   ))('stores $expected when the $key control is emptied', ({ key, value, expected }) => {
-    const app = new App();
-    const host = new SettingsHostStub(app, {
-      id: 'note-player',
-      name: 'Note Player',
-      version: '0.8.9',
-      minAppVersion: '1.14.4',
-      description: 'Settings test',
-      author: 'Test',
-    });
+    const app = appWithFolders([]);
+    const host = new SettingsHostStub(app, manifest);
     host.settings = { ...DEFAULT_SETTINGS, [key]: 'custom' };
     const tab = new NotePlayerSettingsTab(app, host);
 
