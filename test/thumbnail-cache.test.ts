@@ -10,9 +10,11 @@ function harness() {
 	const jobs: Job[] = [];
 	const settled: Array<[string, boolean]> = [];
 	const waiters = new Map<string, () => void>();
+	let onJob: (() => void) | null = null;
 	const queue = new ThumbnailQueue(
 		(id, isStale) => new Promise<boolean>((resolve, reject) => {
 			jobs.push({ id, isStale, finish: resolve, fail: reject });
+			onJob?.();
 		}),
 		(id, written) => {
 			settled.push([id, written]);
@@ -20,7 +22,11 @@ function harness() {
 		},
 	);
 	const settle = (id: string) => new Promise<void>((resolve) => waiters.set(id, resolve));
-	return { queue, jobs, settled, settle };
+	const jobsReach = (count: number) => new Promise<void>((resolve) => {
+		onJob = () => { if (jobs.length >= count) resolve(); };
+		onJob();
+	});
+	return { queue, jobs, settled, settle, jobsReach };
 }
 
 describe('thumbnailCachePath', () => {
@@ -104,22 +110,67 @@ describe('ThumbnailQueue', () => {
 		expect(settled).toEqual([[ids[0], false]]);
 	});
 
-	it('downloads again after a reset and ignores the stale job', async () => {
-		const { queue, jobs, settled, settle } = harness();
+	it('keeps the limit and one job per id while stale jobs from earlier resets are still running', async () => {
+		const four = ids.slice(0, 4);
+		const jobs: Array<{ id: string; finish: () => void }> = [];
+		const reported: string[] = [];
+		let live = 0;
+		let peak = 0;
+		let started: (() => void) | null = null;
+		const jobsReach = (count: number) => new Promise<void>((resolve) => {
+			started = () => { if (jobs.length >= count) resolve(); };
+			started();
+		});
+		let allReported!: () => void;
+		const reportedAll = new Promise<void>((resolve) => { allReported = resolve; });
+		const queue = new ThumbnailQueue(
+			(id) => new Promise<boolean>((resolve) => {
+				live++;
+				peak = Math.max(peak, live);
+				jobs.push({ id, finish: () => { live--; resolve(true); } });
+				started?.();
+			}),
+			(id) => { reported.push(id); if (reported.length === 4) allReported(); },
+		);
+		for (let round = 0; round < 3; round++) {
+			if (round > 0) queue.reset();
+			four.forEach((id) => queue.request(id));
+		}
+		expect(live).toBe(4);
+		expect(queue.activeCount).toBe(4);
+
+		const nextRound = jobsReach(8);
+		jobs.slice(0, 4).forEach((job) => job.finish());
+		await nextRound;
+		expect(jobs.slice(4).map((job) => job.id)).toEqual(four);
+		expect(peak).toBe(4);
+
+		jobs.slice(4).forEach((job) => job.finish());
+		await reportedAll;
+		expect(reported).toEqual(four);
+		expect(jobs).toHaveLength(8);
+	});
+
+	it('downloads an id again after a reset once its stale job settles, and ignores the stale result', async () => {
+		const { queue, jobs, settled, settle, jobsReach } = harness();
 		queue.request(ids[0]!);
 		queue.request(ids[1]!);
 		const stale = jobs[0]!;
 		queue.reset();
 		expect(stale.isStale()).toBe(true);
-		expect(queue.activeCount).toBe(0);
+		expect(queue.activeCount).toBe(2);
 
 		expect(queue.request(ids[0]!)).toBe(true);
+		expect(jobs).toHaveLength(2);
+
+		const freshStarted = jobsReach(3);
+		stale.finish(true);
+		await freshStarted;
 		const fresh = jobs[2]!;
 		expect(fresh.id).toBe(ids[0]);
 		expect(fresh.isStale()).toBe(false);
 
 		const done = settle(ids[0]!);
-		stale.finish(true);
 		fresh.finish(true);
 		await done;
 		expect(settled).toEqual([[ids[0], true]]);
