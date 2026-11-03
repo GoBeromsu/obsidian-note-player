@@ -3,6 +3,7 @@ import type { MarkdownNoteSnapshot } from '../types/notes';
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
 import { hasType, asStringArray, asTrimmedString } from '../utils/frontmatter';
 import { buildYoutubeThumbnailUrl, buildYoutubeWatchUrl, extractYoutubeVideoId } from '../utils/youtube';
+import { linkDisplayText } from '../utils/wikilink';
 import { parseNotePlayerSort, sortTracks } from './base-sort';
 import { isUnavailable } from './track-import';
 
@@ -58,7 +59,7 @@ function toMusicTrack(
   if (!sourceUrl) return null;
   const videoId = extractYoutubeVideoId(sourceUrl);
   if (!videoId) return null;
-  const artist = asTrimmedString(note.frontmatter?.[propertyMapping.musicArtistProperty]) ?? '';
+  const artist = asStringArray(note.frontmatter?.[propertyMapping.musicArtistProperty]).map(linkDisplayText).join(', ');
   return {
     path: note.path,
     // A note saved under its bare id may carry the real title in metadata when renaming it would break links.

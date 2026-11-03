@@ -123,18 +123,32 @@ async function applyMigration(
 				if (!note) throw new Error('Playlist note no longer exists.');
 				const frontmatter = current.frontmatter.get(note.path);
 				if (!frontmatter) throw new Error('Playlist frontmatter is unavailable.');
-				// Write the pairing before creating its base, so a racing embed cannot create a second base.
-				const indexed = await withMetadataSettled({ app, owner }, note, async () => {
+				let preparedFrontmatter = frontmatter;
+				// Archive first; append only once the base resolves, leaving every interruption recoverable.
+				let indexed = await withMetadataSettled({ app, owner }, note, async () => {
 					await app.vault.process(note, (content) => {
 						signal.throwIfAborted();
-						return convertMigrationContent(content, { playlist, settings, app, frontmatter });
+						const updated = convertMigrationContent(content, {
+							playlist: { ...playlist, appendEmbed: playlist.appendEmbed && !playlist.createBase },
+							settings, app, frontmatter,
+						});
+						preparedFrontmatter = migrationFrontmatter(updated);
+						return updated;
 					});
 				});
 				signal.throwIfAborted();
 				if (playlist.createBase) {
 					await app.vault.create(playlist.basePath,
 						`${MIGRATION_BASE_MARKER}${JSON.stringify(note.path)}\n${createPlaylistBaseContent(settings)}`);
+					signal.throwIfAborted();
+					indexed = await withMetadataSettled({ app, owner }, note, async () => {
+						await app.vault.process(note, (content) => {
+							signal.throwIfAborted();
+							return convertMigrationContent(content, { playlist, settings, app, frontmatter: preparedFrontmatter });
+						});
+					});
 				}
+				signal.throwIfAborted();
 				if (indexed && (indexed.embeds ?? []).filter((embed) =>
 					resolveEmbeddedFile(app, embed.link, note.path)?.path === playlist.basePath).length !== 1) {
 					throw new Error('Companion base embed was not preserved. Run the converter again.');

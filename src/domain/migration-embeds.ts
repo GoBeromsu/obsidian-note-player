@@ -1,7 +1,7 @@
 export const MIGRATION_EMBED_MARKER = '%% note-player:playlist-base %%';
 
 export function migrationEmbedBlock(basePath: string): string {
-	return `${MIGRATION_EMBED_MARKER}\n![[${basePath}]]`;
+	return `![[${basePath}]]`;
 }
 
 export type MigrationLinkResolver = (linktext: string) =>

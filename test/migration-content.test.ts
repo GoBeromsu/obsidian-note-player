@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
-import { inspectMigrationEmbeds, migrationEmbedBlock } from '../src/domain/migration-embeds';
+import { inspectMigrationEmbeds, MIGRATION_EMBED_MARKER } from '../src/domain/migration-embeds';
 import { alreadyConverted, convertMigrationContent } from '../src/services/migration-content';
 
 vi.mock('obsidian', () => import('./helpers/migration-obsidian'));
@@ -43,7 +43,7 @@ describe('migration content decisions', () => {
 	])('B7 appends outside a closed fenced example: %s', (body) => {
 		const converted = convertMigrationContent(header + body + '\n', edit);
 
-		expect(converted).toBe(`---\n{"type":"music-playlist","tracks_legacy":["[[A]]"]}\n---\n${body}\n\n%% note-player:playlist-base %%\n![[Bases/Mix.base]]\n`);
+		expect(converted).toBe(`---\n{"type":"music-playlist","tracks_legacy":["[[A]]"]}\n---\n${body}\n\n![[Bases/Mix.base]]\n`);
 	});
 
 	it.each([
@@ -63,23 +63,25 @@ describe('migration content decisions', () => {
 	});
 
 	it('pairs an exact owned block even before the base exists', () => {
-		expect(inspectMigrationEmbeds(migrationEmbedBlock(base), () => null)).toEqual({
+		expect(inspectMigrationEmbeds(`${MIGRATION_EMBED_MARKER}\n![[${base}]]`, () => null)).toEqual({
 			ownedBases: [base], embeddedBases: [base], needsReview: false, unresolvedEmbeds: [],
 		});
 	});
 
-	it('keeps the exact owned block across atomic archive conversion retries', () => {
+	it('writes only an embed and leaves fresh conversion bytes identical on rerun', () => {
 		const first = convertMigrationContent(header + 'Body\n', edit);
 		const archive = { type: 'music-playlist', tracks_legacy: ['[[A]]'] };
 
 		const second = convertMigrationContent(first, { ...edit, frontmatter: archive });
 
+		expect(first).toBe('---\n{"type":"music-playlist","tracks_legacy":["[[A]]"]}\n---\nBody\n\n![[Bases/Mix.base]]\n');
 		expect(second).toBe(first);
 		expect(alreadyConverted(second, source, edit.settings)).toBe(true);
 	});
 
 	it.each([
 		{ body: '![[Bases/Mix.base]]', converted: true },
+		{ body: '%% note-player:playlist-base %%\n![[Bases/Mix.base]]', converted: true },
 		{ body: '%% note-player:playlist-base %%\n\n![[Bases/Mix.base]]', converted: false },
 		{ body: '%% note-player:playlist-base %%\n![[Bases/Mix.base|Alias]]', converted: false },
 	])('classifies archived user embeds and malformed owned blocks: $body', ({ body, converted }) => {

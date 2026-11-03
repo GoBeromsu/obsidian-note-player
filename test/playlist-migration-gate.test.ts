@@ -112,7 +112,7 @@ describe('migration gate regressions', () => {
 		await run(host, () => { fake.pauseIndexing = false; });
 
 		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
-		expect(fake.contents.get(note.path)).toBe(`${archived}\`\`\`\n![[Bases/Existing.base]]\n\`\`\`\n\n%% note-player:playlist-base %%\n![[Playlists/Late.base]]\n`);
+		expect(fake.contents.get(note.path)).toBe(`${archived}\`\`\`\n![[Bases/Existing.base]]\n\`\`\`\n\n![[Playlists/Late.base]]\n`);
 		expect(notices.at(-1)).toBe(complete(2));
 	});
 
@@ -152,10 +152,11 @@ describe('migration gate regressions', () => {
 		expect(notice).toHaveBeenCalledWith('migration_failed', expect.objectContaining({ name: notePath }));
 	});
 
-	it('announces no-op only for owned archived blocks and performs no note writes', async () => {
+	it('writes no marker on fresh conversion and performs a byte-identical no-op on rerun', async () => {
 		const host = await fixture();
 		const fake = state(host.app);
 		await run(host);
+		expect(fake.contents.get(notePath)).toBe('---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]"]}\n---\nOriginal body\n\n![[Playlists/Mix.base]]\n');
 		const before = new Map(fake.contents);
 		const write = vi.fn();
 		fake.onWrite = write;
@@ -218,14 +219,14 @@ describe('migration gate regressions', () => {
 		expect(notices.at(-1)).toContain(complete(0, 0));
 	});
 
-	it('B6 recovers an owned block after base creation and membership interruptions', async () => {
+	it('B6 recovers after base creation and membership interruptions', async () => {
 		const host = await fixture();
 		const fake = state(host.app);
 		const create = host.app.vault.create.bind(host.app.vault);
 		vi.spyOn(host.app.vault, 'create').mockRejectedValueOnce(new Error('Base write interrupted')).mockImplementation(create);
 		await run(host);
 		expect(fake.files.has(basePath)).toBe(false);
-		expect(fake.contents.get(notePath)).toContain(migrationEmbedBlock(basePath));
+		expect(fake.contents.get(notePath)).toBe('---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]"]}\n---\nOriginal body\n');
 		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockRejectedValueOnce(new Error('Membership interrupted'));
 		await run(host);
 
@@ -233,6 +234,20 @@ describe('migration gate regressions', () => {
 
 		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual([basePath]);
 		expect(fake.contents.get(notePath)?.match(/!\[\[/g)).toEqual(['![[']);
+		expect(notices.at(-1)).toBe(complete());
+	});
+
+	it('B6 recovers a legacy marked archive whose base was never created', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const legacy = '---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]"]}\n---\nBody\n\n%% note-player:playlist-base %%\n![[Playlists/Mix.base]]\n';
+		fake.contents.set(notePath, legacy);
+
+		await run(host);
+
+		expect(fake.contents.get(notePath)).toBe(legacy);
+		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual([basePath]);
+		expect(fake.contents.get('Tracks/A.md')).toContain('"playlists":["[[Other]]","[[Playlists/Mix]]"]');
 		expect(notices.at(-1)).toBe(complete());
 	});
 
@@ -251,6 +266,23 @@ describe('migration gate regressions', () => {
 		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual([basePath]);
 		expect(fake.contents.get(notePath)?.match(/!\[\[/g)).toHaveLength(1);
 		expect(fake.contents.get(notePath)).toContain('"tracks_legacy":["[[Tracks/A]]"]');
+		expect(notices.at(-1)).toBe(complete());
+	});
+
+	it.each([false, true])('B6 reuses the reserved base after interrupted embed attachment afterWrite=%s', async (afterWrite) => {
+		const host = await fixture();
+		const fake = state(host.app);
+		const process = host.app.vault.process.bind(host.app.vault);
+		vi.spyOn(host.app.vault, 'process').mockImplementationOnce(process).mockImplementationOnce(async (file, edit) => {
+			if (afterWrite) await process(file, edit);
+			throw new Error('Embed attachment interrupted');
+		});
+		await run(host);
+
+		await run(host);
+
+		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual([basePath]);
+		expect(fake.contents.get(notePath)).toBe('---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]"]}\n---\nOriginal body\n\n![[Playlists/Mix.base]]\n');
 		expect(notices.at(-1)).toBe(complete());
 	});
 

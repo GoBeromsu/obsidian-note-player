@@ -131,7 +131,7 @@ describe('playlist migration service', () => {
 		await done;
 
 		expect(await readNote(host.app, 'Playlists/Mix.md')).toBe(
-			'---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]","[[Missing]]"]}\n---\nOriginal body\n\n%% note-player:playlist-base %%\n![[Playlists/Mix.base]]\n',
+			'---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]","[[Missing]]"]}\n---\nOriginal body\n\n![[Playlists/Mix.base]]\n',
 		);
 		expect(await readNote(host.app, 'Tracks/A.md')).toContain(
 			'"playlists":["[[Other]]","[[Playlists/Mix]]"]',

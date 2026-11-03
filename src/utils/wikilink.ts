@@ -1,5 +1,14 @@
 import type { PlaylistTrackReference } from '../types/notes';
 
+export function linkDisplayText(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('[[') || !trimmed.endsWith(']]')) return trimmed;
+  const [target = '', alias] = trimmed.slice(2, -2).split('|');
+  if (alias?.trim()) return alias.trim();
+  const path = target.split('#')[0]?.trim() ?? '';
+  return stripMarkdownExtension(path.split('/').pop() ?? path);
+}
+
 export function canonicalizeNotePath(input: string): string {
   const trimmed = input.trim();
   if (trimmed.length === 0) {

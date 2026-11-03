@@ -1,5 +1,6 @@
 import { Modal, Setting, setIcon, type App, type ButtonComponent } from 'obsidian';
 import type { PlaylistMigrationPlan } from '../../domain/playlist-migration';
+import { linkDisplayText } from '../../utils/wikilink';
 
 export class MigrationPreviewModal extends Modal {
 	private confirmed = false;
@@ -57,7 +58,9 @@ export class MigrationPreviewModal extends Modal {
 			if (playlist.missing.length) {
 				const missing = row.descEl.createDiv({ cls: 'onp-migration-detail onp-migration-missing' });
 				this.icon(missing, 'triangle-alert');
-				missing.createSpan({ text: `${playlist.missing.length} missing: ${playlist.missing.join(', ')}` });
+				const references = missing.createSpan({ text: `${playlist.missing.length} missing: ${playlist.missing.map(linkDisplayText).join(', ')}` });
+				references.setAttr('title', playlist.missing.join(', '));
+				references.setAttr('aria-label', playlist.missing.join(', '));
 			}
 		}
 		for (const path of this.plan.conflicts) {

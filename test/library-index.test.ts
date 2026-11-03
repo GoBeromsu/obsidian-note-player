@@ -25,6 +25,16 @@ function library(notes: MarkdownNoteSnapshot[], baseConfigs = new Map<string, un
 }
 
 describe('buildMusicLibrary', () => {
+  it.each([
+    { author: '[[Omoide Story - Topic]]', expected: 'Omoide Story - Topic' },
+    { author: '[[path/X.md|Alias]]', expected: 'Alias' },
+    { author: '[[path/X.md]]', expected: 'X' },
+    { author: ['[[path/X|Alias]]', 'Band', '[[Music/Y.md]]'], expected: 'Alias, Band, Y' },
+    { author: [null, '  ', 7], expected: '' },
+  ])('displays author names instead of raw wikilinks: $author', ({ author, expected }) => {
+    const result = library([note('Song', { frontmatter: { type: 'music', source, author } })]);
+    expect(result.tracks[0]?.artist).toBe(expected);
+  });
   it('groups resolved membership links including one track in two playlists', () => {
     const result = library([
       note('Beta', { frontmatterLinks: { playlists: ['First.md', 'Second.md', 'First.md'] } }),
