@@ -1,9 +1,9 @@
-import { BasesView, MarkdownView, Notice, setIcon, type QueryController } from 'obsidian';
+import { BasesView, Component, MarkdownView, Notice, setIcon, type QueryController } from 'obsidian';
 import { buildPlaylistBasesRows, playlistBasesSignature } from '../../domain/playlist-bases';
 import type { PlaylistNote } from '../../types/music';
 import type { PlaylistBasesHost, PlaylistBasesRow } from '../../types/playlist-bases';
 import { plural } from '../../utils/plural';
-import { buildClass, createActionButton, renderEmptyState } from './view-parts';
+import { buildClass, renderEmptyState } from './view-parts';
 
 /** Matches the `type:` the plugin writes into playlist base files. */
 export const PLAYLIST_BASES_VIEW_TYPE = 'note-player';
@@ -25,6 +25,8 @@ export class PlaylistBasesView extends BasesView {
 	private readonly rootEl: HTMLElement;
 	private readonly host: PlaylistBasesHost;
 	private rowEls: RowElements[] = [];
+	/** Owns the listeners of the current render; replaced on every rebuild so stale rows release theirs. */
+	private renderScope: Component | null = null;
 	private renderedSignature: string | null = null;
 	private retryFrame: number | null = null;
 	private retriedWhileDetached = false;
@@ -74,15 +76,22 @@ export class PlaylistBasesView extends BasesView {
 			return;
 		}
 		this.renderedSignature = signature;
-		this.rootEl.empty();
-		this.rowEls = [];
-		this.renderHeader(playlist, rows.length);
+		const scope = this.resetRenderScope();
+		this.renderHeader(scope, playlist, rows.length);
 		if (rows.length === 0) {
 			renderEmptyState(this.rootEl, 'No tracks yet', 'Tracks linked to this playlist appear here.');
 			return;
 		}
 		const list = this.rootEl.createDiv({ cls: 'onp-list onp-queue-list' });
-		for (const row of rows) this.renderRow(list, playlist.path, row);
+		for (const row of rows) this.renderRow(scope, list, playlist.path, row);
+	}
+
+	private resetRenderScope(): Component {
+		if (this.renderScope) this.removeChild(this.renderScope);
+		this.renderScope = this.addChild(new Component());
+		this.rowEls = [];
+		this.rootEl.empty();
+		return this.renderScope;
 	}
 
 	private resolveCompanionPath(): string | null {
@@ -98,22 +107,27 @@ export class PlaylistBasesView extends BasesView {
 	private renderStandalone(): void {
 		if (this.renderedSignature === STANDALONE_SIGNATURE) return;
 		this.renderedSignature = STANDALONE_SIGNATURE;
-		this.rowEls = [];
-		this.rootEl.empty();
+		this.resetRenderScope();
 		renderEmptyState(this.rootEl, "Open this playlist's note to play it.", 'The player follows the note that embeds this base.');
 	}
 
-	private renderHeader(playlist: PlaylistNote, count: number): void {
+	private renderHeader(scope: Component, playlist: PlaylistNote, count: number): void {
 		const header = this.rootEl.createDiv({ cls: 'onp-bases-header' });
 		const heading = header.createDiv({ cls: 'onp-bases-heading' });
 		heading.createDiv({ cls: 'onp-bases-title', text: playlist.title });
 		heading.createDiv({ cls: 'onp-bases-count', text: plural(count, 'track') });
-		const play = createActionButton('Play', 'play', () => this.play(playlist.path, null), { cta: true });
+		const play = header.createEl('button', { cls: 'onp-button mod-cta', attr: { type: 'button', 'aria-label': 'Play', title: 'Play' } });
+		setIcon(play.createSpan({ cls: 'onp-button-icon' }), 'play');
+		play.createSpan({ cls: 'onp-button-label', text: 'Play' });
 		play.disabled = count === 0;
-		header.appendChild(play);
+		scope.registerDomEvent(play, 'click', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.play(playlist.path, null);
+		});
 	}
 
-	private renderRow(list: HTMLElement, companionPath: string, row: PlaylistBasesRow): void {
+	private renderRow(scope: Component, list: HTMLElement, companionPath: string, row: PlaylistBasesRow): void {
 		const rowEl = list.createDiv({
 			cls: buildClass('onp-track-row', { 'is-current': row.current }),
 			attr: { role: 'button', tabindex: '0', 'aria-label': `Play ${row.title}` },
@@ -121,7 +135,7 @@ export class PlaylistBasesView extends BasesView {
 		if (row.current) rowEl.setAttribute('aria-current', 'true');
 		rowEl.createDiv({ cls: 'onp-bases-index' }).createSpan({ cls: 'onp-row-order', text: row.order });
 
-		const thumb = this.createThumb(rowEl, row.thumbnailUrl);
+		const thumb = this.createThumb(scope, rowEl, row.thumbnailUrl);
 		setIcon(thumb.createDiv({ cls: 'onp-row-thumb-play' }), 'play');
 
 		const copy = rowEl.createDiv({ cls: 'onp-row-copy' });
@@ -134,25 +148,24 @@ export class PlaylistBasesView extends BasesView {
 		if (row.current) this.renderNowMarker(actions);
 		this.rowEls.push({ path: row.path, row: rowEl, actions });
 
-		const play = () => this.play(companionPath, row.path);
-		rowEl.addEventListener('click', play);
-		rowEl.addEventListener('keydown', (event) => {
+		scope.registerDomEvent(rowEl, 'click', () => this.play(companionPath, row.path));
+		scope.registerDomEvent(rowEl, 'keydown', (event) => {
 			if (event.key !== 'Enter' && event.key !== ' ') return;
 			event.preventDefault();
-			play();
+			this.play(companionPath, row.path);
 		});
 	}
 
 	/** The music note stays under the image, so it shows while the thumbnail loads or for good when it is missing. */
-	private createThumb(row: HTMLElement, url: string | null): HTMLElement {
+	private createThumb(scope: Component, row: HTMLElement, url: string | null): HTMLElement {
 		const thumb = row.createDiv({ cls: 'onp-row-thumb' });
 		setIcon(thumb.createDiv({ cls: 'onp-row-thumb-placeholder' }), 'music');
 		if (!url) return thumb;
 		const img = thumb.createEl('img', { cls: 'onp-row-thumb-img', attr: { src: url, alt: '', loading: 'lazy' } });
 		if (img.complete && img.naturalWidth > 0) img.addClass('is-loaded');
 		else {
-			img.addEventListener('load', () => img.addClass('is-loaded'), { once: true });
-			img.addEventListener('error', () => img.remove(), { once: true });
+			scope.registerDomEvent(img, 'load', () => img.addClass('is-loaded'), { once: true });
+			scope.registerDomEvent(img, 'error', () => img.remove(), { once: true });
 		}
 		return thumb;
 	}

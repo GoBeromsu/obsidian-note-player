@@ -117,11 +117,12 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const createView = (leaf: WorkspaceLeaf) => new NotePlayerView(leaf, this, this.playerSurface!, this.playerHostEl!, this.volume!);
     this.registerView(VIEW_TYPE_NOTE_PLAYER, createView);
     this.registerView(VIEW_TYPE_LEGACY, createView);
-    this.registerBasesView(PLAYLIST_BASES_VIEW_TYPE, {
+    const basesViewRegistered = this.registerBasesView(PLAYLIST_BASES_VIEW_TYPE, {
       name: 'Note Player',
       icon: 'play-square',
       factory: (controller, containerEl) => new PlaylistBasesView(controller, containerEl, this),
     });
+    if (!basesViewRegistered) console.warn('[Note Player] Bases is disabled in this vault; playlist notes will not show the player view.');
 
     this.addRibbonIcon('play-square', 'Open note player', () => {
       void this.activateView();
