@@ -63,7 +63,7 @@ export class Turntable {
   private settleMs = SPIN_UP_MS;
   private state: PlaybackState = 'idle';
   private live = false;
-  private videoId = '';
+  private labelUrl = '';
   private frame = 0;
   private lastNow = 0;
   private lastVisibleCheck = 0;
@@ -124,7 +124,7 @@ export class Turntable {
     this.sound.setEnabled(soundsOn);
     // Flush styles so the arm transition starts from the pre-render state after re-attach.
     void this.el.offsetWidth;
-    this.setLabel(track?.videoId ?? '', track?.thumbnailUrl ?? '');
+    this.setLabel(track?.thumbnailUrl ?? '');
     this.live = track !== null;
     this.el.toggleClass('is-live', this.live);
     if (state === this.state) return;
@@ -222,9 +222,9 @@ export class Turntable {
     this.el.setCssProps({ '--onp-arm-creep': ratio.toFixed(3) });
   }
 
-  private setLabel(videoId: string, thumbnailUrl: string): void {
-    if (videoId === this.videoId) return;
-    this.videoId = videoId;
+  private setLabel(thumbnailUrl: string): void {
+    if (thumbnailUrl === this.labelUrl) return;
+    this.labelUrl = thumbnailUrl;
     this.el.setCssProps({ '--onp-label-image': thumbnailUrl ? `url("${thumbnailUrl}")` : 'none' });
   }
 

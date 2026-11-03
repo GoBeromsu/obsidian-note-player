@@ -1,4 +1,5 @@
 import type { PlaylistNote } from './music';
+import type { ThumbnailCachePort } from './view';
 
 /** What the Bases view needs from the plugin; app-free so the view depends on nothing in main.ts. */
 export interface PlaylistBasesHost {
@@ -6,6 +7,8 @@ export interface PlaylistBasesHost {
 	playPlaylist(companionPath: string, startTrackPath: string | null): Promise<void>;
 	getState(): { currentTrack: { path: string } | null };
 	onStateChange(callback: () => void): () => void;
+	/** Its changes arrive through onStateChange, so rows re-render when a thumbnail lands. */
+	getThumbnailCache?(): ThumbnailCachePort | null;
 }
 
 export interface PlaylistBasesRow {
@@ -14,7 +17,7 @@ export interface PlaylistBasesRow {
 	order: string;
 	title: string;
 	artist: string;
-	/** Fixed YouTube URL for the video id; null when the video is unavailable, so the placeholder shows instead. */
+	/** Cached file or fixed YouTube URL for the video id; null when the video is unavailable, so the placeholder shows instead. */
 	thumbnailUrl: string | null;
 	unavailable: boolean;
 	current: boolean;

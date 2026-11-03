@@ -11,6 +11,7 @@ import type { NotePlayerSettings } from './types/settings';
 import type { AudioCachePort, PlaylistTrack, PlaylistViewHost, PlaylistViewState } from './types/view';
 import { AudioCacheService } from './services/audio-cache';
 import { PeaksStore } from './services/peaks-store';
+import { ThumbnailCacheService } from './services/thumbnail-cache';
 import { openCompanionBase, writeCompanionBaseFiles } from './services/companion-bases';
 import { TrackImporter } from './services/track-importer';
 import { PlaylistService } from './services/playlist-service';
@@ -42,6 +43,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   private errorMessage: string | null = null;
   private audioCacheService: AudioCacheService | null = null;
   private peaksStore: PeaksStore | null = null;
+  private thumbnailCache: ThumbnailCacheService | null = null;
   private vaultBasePath = '';
   private playerSurface: PlayerSurface | null = null;
   private playerHostEl: HTMLDivElement | null = null;
@@ -83,6 +85,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       migratedFolders = true;
     }
     if (migratedFolders) await this.saveData(this.settings);
+    this.thumbnailCache = ThumbnailCacheService.attach(this, () => this.notifyChange());
     await this.refreshIndex();
 
     this.vaultBasePath = (this.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? '';
@@ -383,12 +386,12 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     }
   }
 
-  async openNote(path: string): Promise<void> {
-    await this.revealTrack(path);
+  openNote(path: string): Promise<void> {
+    return openNoteInTab(this.app, path);
   }
 
-  async openPlaylist(path: string): Promise<void> {
-    await this.revealPlaylist(path);
+  openPlaylist(path: string): Promise<void> {
+    return openNoteInTab(this.app, path);
   }
 
   async openBase(kind: 'music' | 'playlists'): Promise<void> {
@@ -414,6 +417,10 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     return this.peaksStore;
   }
 
+  getThumbnailCache(): ThumbnailCacheService | null {
+    return this.thumbnailCache;
+  }
+
   getAudioCacheService(): AudioCachePort | null {
     return this.audioCacheService;
   }
@@ -422,14 +429,6 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     this.settings.autoplayEnabled = enabled;
     await this.saveSettings();
     this.notifyChange();
-  }
-
-  revealTrack(path: string): Promise<void> {
-    return openNoteInTab(this.app, path);
-  }
-
-  revealPlaylist(path: string): Promise<void> {
-    return openNoteInTab(this.app, path);
   }
 
   private async activateView(): Promise<void> {

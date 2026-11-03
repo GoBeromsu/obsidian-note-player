@@ -54,6 +54,17 @@ describe('buildPlaylistBasesRows', () => {
 		expect(row).toMatchObject({ title: 'Unavailable video', unavailable: true, thumbnailUrl: null, artist: '' });
 	});
 
+	it('uses the injected thumbnail source for available videos only', () => {
+		const asked: string[] = [];
+		const rows = buildPlaylistBasesRows(
+			makePlaylist([makeTrack('a.md', { videoId: 'vidA' }), makeTrack('xyz.md', { title: 'xyz', artist: '', videoId: 'xyz' })]),
+			null,
+			(videoId) => { asked.push(videoId); return `app://cache/${videoId}.jpg`; },
+		);
+		expect(rows.map((row) => row.thumbnailUrl)).toEqual(['app://cache/vidA.jpg', null]);
+		expect(asked).toEqual(['vidA']);
+	});
+
 	it('drops the thumbnail when a track has no video id', () => {
 		const [row] = buildPlaylistBasesRows(makePlaylist([makeTrack('local.md', { videoId: '' })]), null);
 		expect(row?.thumbnailUrl).toBeNull();
