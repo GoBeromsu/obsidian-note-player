@@ -34,6 +34,7 @@ export interface PlaylistMigration {
 export interface PlaylistMigrationPlan {
   readonly playlists: PlaylistMigration[];
   readonly invalid: string[];
+  readonly conflicts: string[];
   readonly totals: {
     readonly playlists: number;
     readonly createBases: number;
@@ -51,6 +52,7 @@ export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMi
   const reservedPaths = new Set(input.existingPaths);
   const playlists: PlaylistMigration[] = [];
   const invalid: string[] = [];
+  const conflicts: string[] = [];
 
   for (const note of input.playlists) {
     const frontmatter = note.frontmatter;
@@ -59,6 +61,11 @@ export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMi
     }
 
     const hasLegacyKey = Object.hasOwn(frontmatter, legacyKey);
+    const renameLegacyKey = hasLegacyKey && legacyKey !== 'tracks_legacy';
+    if (renameLegacyKey && Object.hasOwn(frontmatter, 'tracks_legacy')) {
+      conflicts.push(note.path);
+      continue;
+    }
     if (hasLegacyKey && !Array.isArray(frontmatter[legacyKey])) {
       invalid.push(note.path);
       continue;
@@ -99,7 +106,7 @@ export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMi
       createBase: embeddedBase === undefined,
       appendEmbed: embeddedBase === undefined,
       membershipAdds: [...membershipAdds],
-      renameLegacyKey: hasLegacyKey,
+      renameLegacyKey,
       missing: [...missing],
     });
   }
@@ -107,6 +114,7 @@ export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMi
   return {
     playlists,
     invalid,
+    conflicts,
     totals: {
       playlists: playlists.filter((playlist) =>
         playlist.createBase || playlist.appendEmbed || playlist.renameLegacyKey

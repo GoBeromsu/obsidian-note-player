@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PROPERTY_MAPPING } from '../src/domain/config';
+import { DEFAULT_PROPERTY_MAPPING, normalizeSettings } from '../src/domain/config';
 import {
   planPlaylistMigration,
   type MigrationPlaylistInput,
@@ -47,6 +47,7 @@ describe('planPlaylistMigration', () => {
         missing: [],
       }],
       invalid: [],
+      conflicts: [],
       totals: {
         playlists: 1, createBases: 1, appendEmbeds: 1, membershipAdds: 1,
         renameLegacyKeys: 1, missing: 0, invalid: 0,
@@ -95,6 +96,50 @@ describe('planPlaylistMigration', () => {
     expect(plan.playlists[0]?.missing).toEqual(['[[Missing#Verse]]']);
     expect(plan.playlists[0]?.membershipAdds).toEqual(['Music/Song.md']);
     expect(plan.totals.missing).toBe(1);
+  });
+
+  it('plans no self-rename for a converted tracks_legacy source key', () => {
+    const plan = planPlaylistMigration(input({
+      mapping: normalizeSettings({ playlistTrackProperty: 'tracks_legacy' }),
+      playlists: [playlist({
+        frontmatter: { type: 'music-playlist', tracks_legacy: ['[[Song]]'] },
+        embeddedBases: ['Music/노동요.base'],
+      })],
+      trackMembership: new Map([['Music/Song.md', ['Music/노동요.md']]]),
+    }));
+
+    expect(plan.playlists).toEqual([{
+      notePath: 'Music/노동요.md', basePath: 'Music/노동요.base',
+      createBase: false, appendEmbed: false, membershipAdds: [],
+      renameLegacyKey: false, missing: [],
+    }]);
+    expect(plan.totals.playlists).toBe(0);
+    expect(plan.totals.renameLegacyKeys).toBe(0);
+    expect(plan).toMatchObject({ conflicts: [] });
+  });
+
+  it.each([
+    { legacyKey: 'tracks', archive: ['[[Previous archive]]'] },
+    { legacyKey: 'songs', archive: 'Prior archive' },
+    { legacyKey: 'songs', archive: null },
+  ])('reports an occupied archive without planning writes for $legacyKey', ({ legacyKey, archive }) => {
+    const source = input({
+      mapping: normalizeSettings({ playlistTrackProperty: legacyKey }),
+      playlists: [playlist({
+        frontmatter: {
+          type: 'music-playlist', [legacyKey]: ['[[Song]]'], tracks_legacy: archive,
+        },
+      })],
+    });
+    const before = structuredClone(source);
+
+    const plan = planPlaylistMigration(source);
+
+    expect(plan).toMatchObject({ conflicts: ['Music/노동요.md'], playlists: [], invalid: [] });
+    expect(plan.totals).toMatchObject({
+      playlists: 0, createBases: 0, appendEmbeds: 0, membershipAdds: 0, renameLegacyKeys: 0,
+    });
+    expect(source).toEqual(before);
   });
 
   it('reserves unique paths without claiming unrelated existing bases', () => {
