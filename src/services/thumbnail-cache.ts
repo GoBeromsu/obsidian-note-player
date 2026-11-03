@@ -1,10 +1,27 @@
 import { requestUrl, type DataAdapter, type Plugin } from 'obsidian';
 import { THUMBNAIL_CACHE_FOLDER, thumbnailCachePath, ThumbnailQueue, videoIdFromCachePath } from '../domain/thumbnail-cache';
 import type { ThumbnailCachePort } from '../types/view';
-import { coalesce } from '../utils/coalesce';
+import { coalesce, type Coalesced, type Schedule } from '../utils/coalesce';
 import { buildYoutubeThumbnailUrl } from '../utils/youtube';
 
 type ThumbnailAdapter = Pick<DataAdapter, 'exists' | 'list' | 'mkdir' | 'rmdir' | 'writeBinary' | 'getResourcePath'>;
+
+function nextMicrotask(callback: () => void): () => void {
+	let live = true;
+	queueMicrotask(() => {
+		if (live) callback();
+	});
+	return () => {
+		live = false;
+	};
+}
+
+/** Cancels through the window that issued the request, so a frame booked while a popout had focus is still released. */
+function nextFrame(callback: () => void): () => void {
+	const win = activeWindow;
+	const handle = win.requestAnimationFrame(callback);
+	return () => win.cancelAnimationFrame(handle);
+}
 
 async function fetchThumbnail(url: string): Promise<ArrayBuffer | null> {
 	const response = await requestUrl({ url, throw: false });
@@ -31,23 +48,21 @@ export class ThumbnailCacheService implements ThumbnailCachePort {
 		},
 	);
 	/** Downloads land in bursts; batch them into one re-render per tick (a frame in the app). */
-	private readonly emitSoon: () => void;
+	private readonly emitSoon: Coalesced;
 	/** Swappable so QA can simulate an offline network. */
 	fetchImage: (url: string) => Promise<ArrayBuffer | null> = fetchThumbnail;
 
 	constructor(
 		private readonly adapter: ThumbnailAdapter,
 		private readonly cacheDir: string,
-		schedule: (callback: () => void) => void = queueMicrotask,
+		schedule: Schedule = nextMicrotask,
 	) {
 		this.emitSoon = coalesce(schedule, () => this.emit());
 	}
 
 	static attach(plugin: Plugin, onChange: () => void): ThumbnailCacheService {
 		const pluginDir = plugin.manifest.dir ?? `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}`;
-		const cache = new ThumbnailCacheService(plugin.app.vault.adapter, `${pluginDir}/${THUMBNAIL_CACHE_FOLDER}`, (callback) => {
-			window.requestAnimationFrame(callback);
-		});
+		const cache = new ThumbnailCacheService(plugin.app.vault.adapter, `${pluginDir}/${THUMBNAIL_CACHE_FOLDER}`, nextFrame);
 		plugin.register(cache.subscribe(onChange));
 		plugin.register(() => cache.dispose());
 		return cache;
@@ -90,6 +105,7 @@ export class ThumbnailCacheService implements ThumbnailCachePort {
 
 	dispose(): void {
 		this.disposed = true;
+		this.emitSoon.cancel();
 		this.invalidate();
 		this.awaitingSeed.clear();
 		this.listeners.clear();

@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Plugin } from 'obsidian';
 import { ThumbnailCacheService } from '../src/services/thumbnail-cache';
 
 vi.mock('obsidian', () => ({ requestUrl: vi.fn() }));
@@ -29,6 +30,45 @@ function fakeAdapter(files: Set<string>, ops: string[]) {
 }
 
 describe('ThumbnailCacheService lifecycle', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('cancels a pending notification frame on unload, through the window that booked it', async () => {
+		const frames = new Map<number, () => void>();
+		const booked = deferred();
+		let nextHandle = 0;
+		const win = {
+			requestAnimationFrame: vi.fn((callback: () => void) => {
+				frames.set(++nextHandle, callback);
+				booked.resolve();
+				return nextHandle;
+			}),
+			cancelAnimationFrame: vi.fn((handle: number) => { frames.delete(handle); }),
+		};
+		vi.stubGlobal('activeWindow', win);
+		const unloaders: Array<() => void> = [];
+		const plugin = {
+			manifest: { id: 'note-player', dir: 'cfg/plugins/note-player' },
+			app: { vault: { configDir: 'cfg', adapter: fakeAdapter(new Set([PATH]), []) } },
+			register: (callback: () => void) => { unloaders.push(callback); },
+		} as unknown as Plugin;
+		const onChange = vi.fn();
+		const cache = ThumbnailCacheService.attach(plugin, onChange);
+
+		expect(cache.resolve(ID)).toBe(REMOTE);
+		await booked.promise;
+		expect([...frames.keys()]).toEqual([1]);
+
+		// Swap the active window as a popout gaining focus would; the cancel must still reach the booking window.
+		vi.stubGlobal('activeWindow', { requestAnimationFrame: vi.fn(), cancelAnimationFrame: vi.fn() });
+		for (const unload of unloaders) unload();
+
+		expect(win.cancelAnimationFrame).toHaveBeenCalledWith(1);
+		expect(frames.size).toBe(0);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
 	it('starts no download once disposed while the first folder listing is pending', async () => {
 		const ops: string[] = [];
 		const adapter = fakeAdapter(new Set(), ops);
