@@ -24,7 +24,9 @@ export const NOTICE_CATALOG = {
 	action_succeeded: { template: '{{message}}' },
 	ytdlp_unavailable: { template: 'yt-dlp is not installed. Run brew install yt-dlp, then try again.' },
 	thumbnail_cache_cleared: { template: 'Thumbnail cache cleared.' },
+	folder_create_failed: { template: "Couldn't create the folder {{path}}. Check the name and try again." },
 	thumbnail_cache_clear_failed: { template: "Couldn't clear the thumbnail cache. Try again." },
+	bases_refresh_failed: { template: "Couldn't refresh the companion Bases files. Try again." },
 } as const;
 
 export type NoticeId = keyof typeof NOTICE_CATALOG;

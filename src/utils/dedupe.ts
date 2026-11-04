@@ -18,12 +18,14 @@ export function uniqueName(base: string, taken: (name: string) => boolean): stri
 	return name;
 }
 
+// `#` and `^` would turn the note's wikilink into a heading or block reference.
+export const UNSAFE_NAME_CHARS = /[\\/:*?"<>|#^]/;
+
 export function sanitizeFileName(input: string, fallback = 'New Playlist'): string {
 	const trimmed = input.trim();
 	if (!trimmed) {
 		return fallback;
 	}
 
-	// `#` and `^` would turn the note's wikilink into a heading or block reference.
-	return trimmed.replace(/[\\/:*?"<>|#^]/g, ' ').replace(/\s+/g, ' ').trim();
+	return trimmed.replace(new RegExp(UNSAFE_NAME_CHARS, 'g'), ' ').replace(/\s+/g, ' ').trim();
 }

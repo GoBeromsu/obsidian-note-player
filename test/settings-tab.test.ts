@@ -47,12 +47,20 @@ describe('library settings', () => {
     },
   );
 
+  it('keeps the thumbnail cache at the bottom of settings', () => {
+    const { tab } = setup();
+    const last = tab.getSettingDefinitions().at(-1);
+    if (!last || !('items' in last) || !last.items) throw new Error('Missing last settings group');
+
+    expect(last.items.map((item) => ('name' in item ? item.name : ''))).toEqual(['Thumbnail cache']);
+  });
+
   it('describes playlist folder discovery and creation together', () => {
     const { tab } = setup();
     const library = tab.getSettingDefinitions().find((item) => 'heading' in item && item.heading === 'Library');
     if (!library || !('items' in library) || !library.items) throw new Error('Missing library settings');
     const folder = library.items.find((item) => 'name' in item && item.name === 'Playlist folder');
 
-    expect(folder && 'desc' in folder ? folder.desc : undefined).toBe('Playlists are read from this folder and its subfolders, and new playlists are created here.');
+    expect(folder && 'desc' in folder ? folder.desc : undefined).toBe('Playlists are read from this folder and its subfolders, and new playlists are created here. Default: 90. System/Playlists.');
   });
 });
