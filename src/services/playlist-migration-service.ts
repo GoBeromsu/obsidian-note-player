@@ -55,7 +55,10 @@ async function previewMigration(run: MigrationRun): Promise<void> {
 	const scan = await collectMigrationPlan(host.app, host.settings);
 	signal.throwIfAborted();
 	const { plan, failures } = scan;
-	for (const { path: name, reason } of failures) showNotice('migration_failed', { name, reason });
+	for (const { path: name, reason } of failures) {
+		if (name.endsWith('.base')) showNotice('base_unreadable', { name: name.split('/').pop() ?? name });
+		else showNotice('migration_failed', { name, reason });
+	}
 	if (!plan.totals.playlists && !plan.cardsUpgrades?.length && !plan.conflicts.length && !plan.invalid.length) {
 		if (failures.length) return;
 		const noOpSettings = { ...host.settings };
@@ -98,7 +101,7 @@ async function applyMigration(
 	const { host, signal, owner } = run;
 	const { app, settings } = host;
 	const { plan: preview } = scan;
-	const progress = new Notice('', 0);
+	let progress: Notice | undefined;
 	const converted = new Set<string>();
 	let linked = 0;
 	let missing = 0;
@@ -109,7 +112,9 @@ async function applyMigration(
 		for (const [index, playlist] of playlists.entries()) {
 			signal.throwIfAborted();
 			reportProgress(index + 1, playlists.length, playlist.notePath, 'converting');
-			progress.setMessage(renderNotice(NOTICE_CATALOG.migration_progress.template, { name: linkDisplayText(playlist.notePath, true) }));
+			const message = renderNotice(NOTICE_CATALOG.migration_progress.template, { name: linkDisplayText(playlist.notePath, true) });
+			if (progress) progress.setMessage(message);
+			else progress = new Notice(message, 0);
 			try {
 				const current = await collectMigrationPlan(app, settings, playlist.notePath);
 				signal.throwIfAborted();
@@ -233,14 +238,15 @@ async function applyMigration(
 		for (const { path, reason } of await clearLegacySetting(run)) errors.add(`${path}: ${reason}`);
 		signal.throwIfAborted();
 	} finally {
-		progress.hide();
+		progress?.hide();
 	}
 	const summary = [
 		...(converted.size ? [renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: converted.size, tracks: linked, missing })] : []),
 		...(upgraded ? [renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: upgraded })] : []),
 	];
 	const skipped = [...preview.conflicts, ...preview.invalid];
-	new Notice([...summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n'));
+	const message = [...summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n');
+	if (message) new Notice(message);
 }
 
 async function clearLegacySetting(run: MigrationRun): Promise<MigrationFailure[]> {

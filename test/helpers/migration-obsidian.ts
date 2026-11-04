@@ -106,7 +106,7 @@ function cacheFor(content: string): Cache {
 
 export const notices: string[] = [];
 export class Notice {
-	constructor(message: string = '') { if (message) notices.push(message); }
+	constructor(message: string = '', duration?: number) { if (message && duration !== 0) notices.push(message); }
 	setMessage() {}
 	hide() {}
 }

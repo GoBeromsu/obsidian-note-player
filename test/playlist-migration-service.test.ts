@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App, Component, Notice } from 'obsidian';
+import { App, Component } from 'obsidian';
 import * as obsidian from 'obsidian';
 import { parse } from 'yaml';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
@@ -91,9 +91,11 @@ describe('playlist migration service', () => {
 		}
 		const { done } = await openPreview(host);
 
+		const notice = vi.spyOn(obsidian, 'Notice');
 		preview.finish?.(true);
 		await done;
 
+		expect(notice.mock.calls.every(([message]) => typeof message === 'string' && message.trim().length > 0)).toBe(true);
 		expect(notices.at(-1)).toBe(count === 1
 			? 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 1 playlist base to the cards view.'
 			: 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 2 playlist bases to the cards view.');
@@ -111,12 +113,36 @@ describe('playlist migration service', () => {
 		}
 		const { done } = await openPreview(host);
 
+		const notice = vi.spyOn(obsidian, 'Notice');
 		preview.finish?.(true);
 		await done;
 
+		expect(notice.mock.calls).toHaveLength(1);
+		expect(notice.mock.calls[0]?.[0]).toBeTruthy();
 		expect(notices.at(-1)).toBe(count === 1
 			? 'Switched 1 playlist base to the cards view.'
 			: 'Switched 2 playlist bases to the cards view.');
+	});
+
+	it('does not create an empty final notice when conversion completes externally during preview', async () => {
+		const host = await fixture('tracks');
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () => '---\n{"type":"music-playlist","tracks":[]}\n---\n');
+		const { done } = await openPreview(host);
+		await host.app.vault.create('Playlists/Mix.base', 'views: [{type: cards, name: Cards}]\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Playlists/Mix.base]]\n');
+		const notice = vi.spyOn(obsidian, 'Notice');
+		const write = vi.spyOn(host.app.vault, 'process');
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notice.mock.calls.every(([message]) => typeof message === 'string' && message.trim().length > 0)).toBe(true);
+		expect(notice.mock.calls).toHaveLength(1);
+		expect(notices).toEqual([]);
+		expect(write).not.toHaveBeenCalled();
 	});
 
 	it.each(['>-', '|-'])('preserves parsed base data with %s block scalars, comments, quoted keys, and other views', async (style) => {
@@ -151,7 +177,11 @@ filters:
 		host.settings.musicThumbnailProperty = 'poster';
 		const intended = parse(source);
 		intended.views[0].type = 'cards';
+		intended.views[0].name = 'Cards';
 		intended.views[0].image = 'note.poster';
+		intended.views[0].imageFit = '';
+		intended.views[0].imageAspectRatio = 0.5625;
+		intended.properties = { 'file.name': { displayName: 'Title' }, 'note.author': { displayName: 'Artist' } };
 		const { done } = await openPreview(host);
 
 		preview.finish?.(true);
@@ -171,12 +201,47 @@ filters:
 		await host.app.vault.create('Bases/Broken.base', source);
 		const before = [...state(host.app).contents];
 		const write = vi.spyOn(host.app.vault, 'process');
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
+		await convertPlaylistNotes(host);
 		await convertPlaylistNotes(host);
 
 		expect([...state(host.app).contents]).toEqual(before);
 		expect(write).not.toHaveBeenCalled();
-		expect(notices).toEqual([expect.stringMatching(/Bases\/Broken\.base: Needs review/)]);
+		expect(notices).toHaveLength(2);
+		for (const message of notices) {
+			expect(message).toContain('Broken.base');
+			expect(message).not.toMatch(/[\r\n^]|Bases\//);
+		}
+		expect(warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Bases/Broken.base'), expect.any(Error));
+		expect(warning.mock.calls[0]?.[1]).toHaveProperty('message', expect.stringContaining('\n'));
+	});
+
+	it('reports each shared unreadable base once per run while upgrading unrelated bases', async () => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.create('Bases/Good.base', 'views: [{type: note-player, name: Player}]\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist"}\n---\n![[Bases/Good.base]]\n');
+		for (const name of ['Broken', 'Other']) await host.app.vault.create(`Bases/${name}.base`, 'views: [');
+		for (const [name, base] of [['A', 'Broken'], ['B', 'Broken'], ['C', 'Other']]) {
+			await host.app.vault.create(`Playlists/${name}.md`,
+				`---\n{"type":"music-playlist"}\n---\n![[Bases/${base}.base]]\n`);
+		}
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notices).toEqual([
+			renderNotice(NOTICE_CATALOG.base_unreadable.template, { name: 'Broken.base' }),
+			renderNotice(NOTICE_CATALOG.base_unreadable.template, { name: 'Other.base' }),
+			renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: 1 }),
+		]);
+		expect(warning).toHaveBeenCalledTimes(2);
+		expect(parse(await readNote(host.app, 'Bases/Good.base')).views[0].type).toBe('cards');
 	});
 
 	it.each(['views: [', 'views: []'])('writes nothing when serialized YAML is invalid or changes data: %s', async (serialized) => {
@@ -194,7 +259,7 @@ filters:
 
 		expect([...state(host.app).contents]).toEqual(before);
 		expect(write).not.toHaveBeenCalled();
-		expect(notices).toEqual([expect.stringMatching(/Bases\/Mix\.base: Needs review/)]);
+		expect(notices).toEqual([expect.stringMatching(/Mix\.base[^\n]*$/)]);
 	});
 
 	it('converts only the legacy playlist in a mixed vault and reruns byte-identically', async () => {
@@ -270,11 +335,13 @@ filters:
 		await done;
 		expect(parse(await readNote(host.app, 'Bases/Collection.base'))).toEqual({
 			filters: { and: ['type == "music"'] },
+			properties: { 'file.name': { displayName: 'Title' }, 'note.author': { displayName: 'Artist' } },
 			views: [
-				{ type: 'cards', name: 'Player', image: 'note.poster', filters: 'author == "A"',
+				{ type: 'cards', name: 'Cards', image: 'note.poster', filters: 'author == "A"',
+					imageFit: '', imageAspectRatio: 0.5625,
 					sort: [{ property: 'file.mtime', direction: 'DESC' }], order: ['file.name', 'note.author'] },
 				{ type: 'table', name: 'My table', order: ['file.name'] },
-				{ type: 'cards', name: 'Extra', sort: [], image: 'note.poster' },
+				{ type: 'cards', name: 'Extra', sort: [], image: 'note.poster', imageFit: '', imageAspectRatio: 0.5625 },
 			],
 		});
 		expect(await readNote(host.app, 'Bases/Unpaired.base')).toBe(source);
@@ -292,18 +359,14 @@ filters:
 	});
 
 	it('shows the playlist basename during conversion', async () => {
-		const messages: string[] = [];
-		vi.spyOn(Notice.prototype, 'setMessage').mockImplementation(function (this: Notice, message) {
-			messages.push(typeof message === 'string' ? message : message.textContent ?? '');
-			return this;
-		});
+		const notice = vi.spyOn(obsidian, 'Notice');
 		const host = await fixture();
 		const { done } = await openPreview(host);
 
 		preview.finish?.(true);
 		await done;
 
-		expect(messages).toEqual(['Converting Mix...']);
+		expect(notice).toHaveBeenCalledWith('Converting Mix...', 0);
 	});
 
 	it.each([1, 2])('pluralizes converted playlists and linked tracks for count %i', async (count) => {

@@ -7,6 +7,7 @@ import { MigrationPreviewModal } from '../src/ui/views/MigrationPreviewModal';
 const rendered = vi.hoisted(() => ({
 	buttons: [] as { text: string; disabled: boolean }[],
 	summaries: [] as { readonly textContent: string }[],
+	preservation: [] as { readonly textContent: string }[],
 }));
 
 vi.mock('obsidian', async () => {
@@ -18,6 +19,7 @@ vi.mock('obsidian', async () => {
 		createDiv(options: Options = {}): Element {
 			const child = new Element(options.cls === 'onp-migration-summary');
 			if (options.text) child.appendText(options.text);
+			if (options.cls === 'onp-migration-preservation') rendered.preservation.push(child);
 			this.parts.push(child);
 			return child;
 		}
@@ -61,7 +63,7 @@ vi.mock('obsidian', async () => {
 	};
 });
 
-beforeEach(() => { rendered.buttons.length = 0; rendered.summaries.length = 0; });
+beforeEach(() => { rendered.buttons.length = 0; rendered.summaries.length = 0; rendered.preservation.length = 0; });
 
 describe('migration preview counts', () => {
 	it.each([
@@ -87,5 +89,6 @@ describe('migration preview counts', () => {
 			{ text: button, disabled: false },
 		]);
 		expect(rendered.summaries.slice(0, 2).map((element) => element.textContent)).toEqual(counts);
+		expect(rendered.preservation).toHaveLength(legacy ? 1 : 0);
 	});
 });

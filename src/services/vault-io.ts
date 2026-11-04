@@ -177,6 +177,18 @@ export function collectNoteSnapshots(app: App, folders: string[], mapping: Youtu
 
 const warnedBasePaths = new WeakMap<App, Set<string>>();
 
+export function warnUnreadableBase(app: App, path: string, error: unknown): void {
+	let warned = warnedBasePaths.get(app);
+	if (!warned) {
+		warned = new Set();
+		warnedBasePaths.set(app, warned);
+	}
+	if (!warned.has(path)) {
+		warned.add(path);
+		console.warn(`[Note Player] Could not read or parse playlist base ${path}; using name-ascending queue order.`, error);
+	}
+}
+
 export async function collectBaseConfigs(app: App, notes: MarkdownNoteSnapshot[], playlistNoteType: string): Promise<Map<string, unknown>> {
 	const paths = new Set(notes.filter((note) => hasType(note.frontmatter, playlistNoteType)).flatMap((note) => note.embeddedBases));
 	const configs = new Map<string, unknown>();
@@ -188,15 +200,7 @@ export async function collectBaseConfigs(app: App, notes: MarkdownNoteSnapshot[]
 			configs.set(path, parseYaml(content));
 		} catch (error: unknown) {
 			if (!(error instanceof Error)) throw error;
-			let warned = warnedBasePaths.get(app);
-			if (!warned) {
-				warned = new Set();
-				warnedBasePaths.set(app, warned);
-			}
-			if (!warned.has(path)) {
-				warned.add(path);
-				console.warn(`[Note Player] Could not read or parse playlist base ${path}; using name-ascending queue order.`, error);
-			}
+			warnUnreadableBase(app, path, error);
 		}
 	}
 	return configs;

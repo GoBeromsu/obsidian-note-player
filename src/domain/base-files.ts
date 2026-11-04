@@ -108,6 +108,8 @@ export function createPlaylistBaseContent(mapping: YoutubePlaylistPropertyMappin
 		'  - type: cards',
 		'    name: "Cards"',
 		`    image: ${serializeValue(`note.${mapping.musicThumbnailProperty}`)}`,
+		'    imageFit: ""',
+		'    imageAspectRatio: 0.5625',
 		'    sort:',
 		'      - property: file.name',
 		'        direction: ASC',
@@ -119,6 +121,10 @@ export function createPlaylistBaseContent(mapping: YoutubePlaylistPropertyMappin
 		'    order:',
 		'      - file.name',
 		...[mapping.musicArtistProperty, mapping.musicUrlProperty].filter(Boolean).map((property) => `      - ${serializeValue(property)}`),
+		'properties:',
+		'  file.name:',
+		'    displayName: "Title"',
+		...(mapping.musicArtistProperty ? [`  ${serializeKey(`note.${mapping.musicArtistProperty}`)}:`, '    displayName: "Artist"'] : []),
 		'',
 	].join('\n');
 }
