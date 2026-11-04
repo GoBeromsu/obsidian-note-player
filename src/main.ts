@@ -37,7 +37,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   private library: MusicLibrarySnapshot = EMPTY_LIBRARY;
   private refreshGeneration = 0;
   private changeListeners = new Set<() => void>();
-  private readonly scheduleRefresh = debounce(() => { void this.refreshIndex(); }, 250, true);
+  private readonly scheduleRefresh = debounce(() => { if (this.app.workspace.layoutReady) void this.refreshIndex(); }, 250, true);
   private readonly playback = new PlaybackStateManager();
   private errorMessage: string | null = null;
   private audioCacheService: AudioCacheService | null = null;
@@ -87,7 +87,6 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     }
     if (migratedFolders) await this.saveData(this.settings);
     this.thumbnailCache = ThumbnailCacheService.attach(this, () => this.notifyChange());
-    await this.refreshIndex();
 
     this.vaultBasePath = (this.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? '';
     this.audioCacheService = this.createAudioCache();
@@ -142,12 +141,17 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     this.addSettingTab(new NotePlayerSettingsTab(this.app, this));
     this.registerVaultRefreshEvents();
 
-    // Enabling mid-session (reload, update) runs this before Obsidian restores the existing leaf, which would duplicate the view.
-    if (this.settings.autoOpenOnStartup && !this.app.workspace.layoutReady) {
-      this.app.workspace.onLayoutReady(() => {
-        void this.activateView();
+    // A reload must defer discovery too, even when onLayoutReady invokes its callback immediately.
+    const openOnReady = this.settings.autoOpenOnStartup && !this.app.workspace.layoutReady;
+    let live = true;
+    this.register(() => { live = false; });
+    this.app.workspace.onLayoutReady(() => {
+      queueMicrotask(() => {
+        if (!live) return;
+        void this.refreshIndex();
+        if (openOnReady) void this.activateView();
       });
-    }
+    });
   }
 
   onunload(): void {

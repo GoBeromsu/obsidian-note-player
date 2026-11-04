@@ -97,7 +97,7 @@ Note Player is desktop only. It has no telemetry and no accounts, and it sends n
 
 ### Reading your vault
 
-- To build the music library, the plugin reads the frontmatter of Markdown notes in your **Music folder** and **Playlist folder**, including all subfolders, and in the track notes your playlists link to, through Obsidian's metadata cache. Choosing **Vault root** in either folder setting includes the whole vault, including all subfolders. It does this on startup, when notes change, and when you run **Refresh music library**. Note contents aren't read, and nothing leaves your device.
+- To build the music library, the plugin reads the frontmatter of Markdown notes in your **Music folder** and **Playlist folder**, including all subfolders, and in the track notes your playlists link to, through Obsidian's metadata cache. Choosing **Vault root** in either folder setting includes the whole vault, including all subfolders. Initial indexing is deferred until the workspace layout is ready; subsequent indexing runs when notes change and when you run **Refresh music library**. Discovery uses cached Markdown file metadata rather than walking folders or reading note contents. Only paired `.base` files are read for queue sorting. Nothing leaves your device.
 - The property fields in settings suggest frontmatter keys found across your vault.
 
 ### Clipboard
