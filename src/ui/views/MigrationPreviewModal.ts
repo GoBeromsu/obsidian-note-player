@@ -43,10 +43,12 @@ export class MigrationPreviewModal extends Modal {
 			item.createEl('strong', { text: count.slice(0, separator) });
 			item.appendText(count.slice(separator));
 		}
-		this.contentEl.createEl('p', {
-			text: 'Original track lists stay in tracks_legacy. Nothing is deleted.',
-			cls: 'onp-migration-preservation',
-		});
+		if (playlistCount) {
+			this.contentEl.createEl('p', {
+				text: 'Original track lists stay in tracks_legacy. Nothing is deleted.',
+				cls: 'onp-migration-preservation',
+			});
+		}
 		for (const playlist of playlists) {
 			const row = this.playlistRow(playlist.notePath, false);
 			const status = row.nameEl.createSpan({ cls: 'onp-migration-status is-ready' });
