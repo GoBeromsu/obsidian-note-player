@@ -23,6 +23,8 @@ export interface MigrationScan {
 
 export async function collectMigrationPlan(app: App, settings: NotePlayerSettings, notePath?: string): Promise<MigrationScan> {
 	const legacyKey = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
+	const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const rawCandidate = new RegExp(`(?:^[ \\t]*(?:#[ \\t]*)?(?:-[ \\t]+)?|[{,][ \\t]*)["']?(?:${escapePattern(legacyKey)}["']?[ \\t]*:|type["']?[ \\t]*:\\s*["']?${escapePattern(settings.playlistNoteType)}["']?(?=[\\s,}]|$))`, 'm');
 	const folder = settings.playlistFolder.replace(/^\/|\/$/g, '');
 	const playlists: MigrationPlaylistInput[] = [];
 	const failures: MigrationFailure[] = [];
@@ -42,9 +44,18 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 		if (notePath && file.path !== notePath) continue;
 		if (folder && !file.path.startsWith(`${folder}/`)) continue;
 		try {
-			const content = await app.vault.read(file);
+			const content = await app.vault.cachedRead(file);
 			const info = getFrontMatterInfo(content);
-			const parsed: unknown = info.exists ? parseYaml(info.frontmatter) : {};
+			let parsed: unknown;
+			try {
+				parsed = info.exists ? parseYaml(info.frontmatter) : {};
+			} catch (error: unknown) {
+				if (rawCandidate.test(info.frontmatter)) {
+					const reason = error instanceof Error ? error.message : String(error);
+					failures.push({ path: file.path, reason: `Needs review: playlist YAML could not be parsed: ${reason}` });
+				}
+				continue;
+			}
 			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
 			const frontmatter = Object.fromEntries(Object.entries(parsed));
 			if (!hasType(frontmatter, settings.playlistNoteType)) continue;

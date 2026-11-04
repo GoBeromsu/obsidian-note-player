@@ -81,6 +81,179 @@ afterEach(() => {
 });
 
 describe('migration gate regressions', () => {
+	it.each(['Templates/meeting.template.md', 'Playlists/meeting.template.md'])(
+		'reports already Bases on rerun with unrelated malformed YAML: %s', async (path) => {
+			const host = await fixture();
+			await run(host);
+			host.settings.legacyPlaylistTrackProperty = 'songs';
+			await host.app.vault.create(path, '---\n{"type":"template"}\n---\n');
+			state(host.app).contents.set(path, '---\n{{participants_yaml}}\n---\n');
+			notices.length = 0;
+
+			await run(host);
+
+			expect(notices).toEqual([NOTICE_CATALOG.migration_already_bases.template]);
+			expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+		},
+	);
+
+	it.each(['Templates/meeting.template.md', 'Playlists/meeting.template.md'])(
+		'completes conversion without unrelated malformed YAML errors: %s', async (path) => {
+			const host = await fixture();
+			await host.app.vault.create(path, '---\n{"type":"template"}\n---\n');
+			state(host.app).contents.set(path, '---\n{{participants_yaml}}\n---\n');
+
+			await run(host);
+
+			expect(notices).toEqual([complete()]);
+			expect(state(host.app).contents.get(notePath)).toContain(migrationEmbedBlock(basePath));
+			expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+		},
+	);
+
+	it('reports malformed legacy candidates once as needs review while others convert', async () => {
+		const host = await fixture();
+		const path = 'Playlists/Broken.md';
+		await host.app.vault.create(path, header);
+		const malformed = '---\n{"type":"music-playlist","songs":[\n---\n';
+		state(host.app).contents.set(path, malformed);
+		const notice = vi.spyOn(noticeService, 'showNotice');
+
+		await run(host);
+
+		expect(notice).toHaveBeenCalledWith('migration_failed', {
+			name: path, reason: expect.stringContaining('Needs review'),
+		});
+		expect(notices.filter((message) => message.includes(path))).toHaveLength(1);
+		expect(notices.at(-1)).toBe(complete());
+		expect(state(host.app).contents.get(notePath)).toContain(migrationEmbedBlock(basePath));
+		expect(state(host.app).contents.get(path)).toBe(malformed);
+		expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+	});
+
+	it.each([false, true])('SC1 ignores stale playlist cache for malformed templates on rerun=%s', async (rerun) => {
+		const host = await fixture();
+		if (rerun) {
+			await run(host);
+			host.settings.legacyPlaylistTrackProperty = 'songs';
+		}
+		const path = 'Playlists/meeting.template.md';
+		await host.app.vault.create(path, header);
+		state(host.app).contents.set(path,
+			'---\ntype: template\nparticipants:\n  # meeting-transcript:participants:start\n{{participants_yaml}}\n---\ntype: music-playlist\nsongs: []\n');
+		notices.length = 0;
+
+		await run(host);
+
+		expect(notices).toEqual([rerun ? NOTICE_CATALOG.migration_already_bases.template : complete()]);
+		expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+	});
+
+	it.each([
+		{ cache: 'missing', healthy: false, yaml: 'type: music-playlist\nbroken: [' },
+		{ cache: 'other', healthy: false, yaml: 'type: "music-playlist"\nbroken: [' },
+		{ cache: 'missing', healthy: true, yaml: "broken: [\ntype: 'music-playlist'" },
+		{ cache: 'other', healthy: true, yaml: 'broken: [\nsongs : [' },
+		{ cache: 'missing', healthy: false, yaml: '{type: music-playlist, songs: [' },
+		{ cache: 'other', healthy: true, yaml: '{type: other, songs: [' },
+		{ cache: 'missing', healthy: false, yaml: 'nested:\n  type: music-playlist\n  broken: [' },
+		{ cache: 'other', healthy: true, yaml: 'nested:\n  songs: [' },
+	])('SC2 reports malformed content with $cache cache and healthy=$healthy: $yaml', async ({ cache, healthy, yaml }) => {
+		const host = await fixture();
+		const fake = state(host.app);
+		if (!healthy) {
+			await run(host);
+			host.settings.legacyPlaylistTrackProperty = 'songs';
+		}
+		const path = 'Playlists/Broken.md';
+		await host.app.vault.create(path, '---\n{"type":"other"}\n---\n');
+		if (cache === 'missing') fake.cache.delete(path);
+		const malformed = `---\n${yaml}\n---\n`;
+		fake.contents.set(path, malformed);
+		notices.length = 0;
+		const notice = vi.spyOn(noticeService, 'showNotice');
+
+		await run(host);
+
+		expect(notice).toHaveBeenCalledWith('migration_failed', {
+			name: path, reason: expect.stringContaining('Needs review'),
+		});
+		expect(notices.filter((message) => message.includes(path))).toHaveLength(1);
+		expect(notice).not.toHaveBeenCalledWith('migration_already_bases');
+		if (healthy) expect(notices.at(-1)).toBe(complete());
+		else expect(notices).toHaveLength(1);
+		expect(fake.contents.get(path)).toBe(malformed);
+		expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+	});
+
+	it.each([
+		{ yaml: 'songs.list: [', candidate: true },
+		{ yaml: 'type: "mix[live]"', candidate: true },
+		{ yaml: 'songsXlist: [', candidate: false },
+		{ yaml: 'type: mixl', candidate: false },
+		{ yaml: 'type: mix[live]extra', candidate: false },
+		{ yaml: 'nested:\n  songs.list: [\n  type: mix[live]', candidate: true },
+		{ yaml: '# songs.list: [\n# type: mix[live]', candidate: true },
+	])('classifies malformed custom settings conservatively and literally: $yaml', async ({ yaml, candidate }) => {
+		const host = await fixture();
+		await run(host);
+		host.settings.legacyPlaylistTrackProperty = 'songs.list';
+		host.settings.playlistNoteType = 'mix[live]';
+		const path = 'Playlists/Custom.md';
+		await host.app.vault.create(path, '---\n{"type":"other"}\n---\n');
+		state(host.app).cache.delete(path);
+		state(host.app).contents.set(path, `---\nbroken: [\n${yaml}\n{{participants_yaml}}\n---\n`);
+		notices.length = 0;
+		const notice = vi.spyOn(noticeService, 'showNotice');
+
+		await run(host);
+
+		if (candidate) {
+			expect(notice).toHaveBeenCalledWith('migration_failed', {
+				name: path, reason: expect.stringContaining('Needs review'),
+			});
+			expect(notices).toHaveLength(1);
+		} else expect(notices).toEqual([NOTICE_CATALOG.migration_already_bases.template]);
+	});
+
+	it.each([
+		{ yaml: 'subtype: music-playlist', candidate: false },
+		{ yaml: 'mytracks: [', candidate: false },
+		{ yaml: 'prototype: music-playlist', candidate: false },
+		{ yaml: '"subtype": music-playlist', candidate: false },
+		{ yaml: '{subtype: music-playlist, mytracks: [', candidate: false },
+		{ yaml: '"type": music-playlist', candidate: true },
+		{ yaml: "'type': music-playlist", candidate: true },
+		{ yaml: '"tracks": [', candidate: true },
+		{ yaml: "'tracks': [", candidate: true },
+		{ yaml: '{type: music-playlist, other: [', candidate: true },
+		{ yaml: '{other: value, "tracks": [', candidate: true },
+		{ yaml: "  - 'type': music-playlist", candidate: true },
+		{ yaml: '\t- tracks: [', candidate: true },
+	])('matches whole malformed mapping keys only: $yaml', async ({ yaml, candidate }) => {
+		const host = await fixture();
+		await run(host);
+		host.settings.legacyPlaylistTrackProperty = 'tracks';
+		const path = 'Playlists/Boundary.md';
+		await host.app.vault.create(path, '---\n{"type":"other"}\n---\n');
+		state(host.app).cache.delete(path);
+		const malformed = `---\n${yaml}\nparticipants:\n  # meeting-transcript:participants:start\n{{participants_yaml}}\n---\n`;
+		state(host.app).contents.set(path, malformed);
+		notices.length = 0;
+		const notice = vi.spyOn(noticeService, 'showNotice');
+
+		await run(host);
+
+		if (candidate) {
+			expect(notice).toHaveBeenCalledWith('migration_failed', {
+				name: path, reason: expect.stringContaining('Needs review'),
+			});
+			expect(notices).toHaveLength(1);
+		} else expect(notices).toEqual([NOTICE_CATALOG.migration_already_bases.template]);
+		expect(state(host.app).contents.get(path)).toBe(malformed);
+		expect(host.settings.legacyPlaylistTrackProperty).toBe('tracks');
+	});
+
 	it('B12 reuses the actual embed after an equal-length edit before attachment', async () => {
 		const host = await fixture();
 		const fake = state(host.app);
