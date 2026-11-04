@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App, Component, Notice } from 'obsidian';
+import * as obsidian from 'obsidian';
+import { parse } from 'yaml';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
 import { notices, state } from './helpers/migration-obsidian';
@@ -76,6 +78,84 @@ afterEach(() => {
 });
 
 describe('playlist migration service', () => {
+	it.each(['>-', '|-'])('preserves parsed base data with %s block scalars, comments, quoted keys, and other views', async (style) => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Mix.base]]\n');
+		const source = `# retained data, normalized formatting allowed
+filters:
+  and:
+    - 'type == "music"'
+"custom key": |
+  first line
+  second line
+"views":
+  - "type": ${style}
+      note-player
+    image: >-
+      note.old
+    name: Player
+    filters: |
+      author == "A"
+    sort: [{property: file.name, direction: DESC}]
+    order: [file.name, note.author]
+  - type: table
+    name: My table
+    filters: 'author != "B"'
+    order: [file.name]
+`;
+		await host.app.vault.create('Bases/Mix.base', source);
+		host.settings.musicThumbnailProperty = 'poster';
+		const intended = parse(source);
+		intended.views[0].type = 'cards';
+		intended.views[0].image = 'note.poster';
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(parse(await readNote(host.app, 'Bases/Mix.base'))).toEqual(intended);
+		expect(notices.at(-1)).toContain('1 playlist base switched to the cards view.');
+	});
+
+	it('reports unparseable paired bases as needs review without any write or success notice', async () => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Broken.base]]\n');
+		const source = 'views:\n  - type: note-player\n    sort: [\n';
+		await host.app.vault.create('Bases/Broken.base', source);
+		const before = [...state(host.app).contents];
+		const write = vi.spyOn(host.app.vault, 'process');
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(write).not.toHaveBeenCalled();
+		expect(notices).toEqual([expect.stringMatching(/Bases\/Broken\.base: Needs review/)]);
+	});
+
+	it.each(['views: [', 'views: []'])('writes nothing when serialized YAML is invalid or changes data: %s', async (serialized) => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Mix.base]]\n');
+		await host.app.vault.create('Bases/Mix.base', 'views:\n  - type: note-player\n    name: Player\n');
+		const before = [...state(host.app).contents];
+		const write = vi.spyOn(host.app.vault, 'process');
+		vi.spyOn(obsidian, 'stringifyYaml').mockReturnValue(serialized);
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(write).not.toHaveBeenCalled();
+		expect(notices).toEqual([expect.stringMatching(/Bases\/Mix\.base: Needs review/)]);
+	});
+
 	it('converts only the legacy playlist in a mixed vault and reruns byte-identically', async () => {
 		const host = await fixture('tracks');
 		const base = 'views:\n  - type: cards\n    name: Cards\n';
@@ -132,8 +212,6 @@ describe('playlist migration service', () => {
 		await host.app.vault.process(note, () =>
 			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Collection.base]]\n');
 		const source = '# Keep this comment\nfilters:\n  and:\n    - \'type == "music"\'\nviews:\n  - type: note-player # custom\n    name: "Player"\n    filters: \'author == "A"\'\n    sort:\n      - property: file.mtime\n        direction: DESC\n    order: [file.name, note.author]\n  - type: table\n    name: "My table"\n    order: [file.name]\n  - {type: note-player, name: Extra, sort: []}\n';
-		const expected = source.replace('type: note-player # custom\n', 'type: cards # custom\n    image: "note.poster"\n')
-			.replace('{type: note-player,', '{type: cards, image: "note.poster",');
 		await host.app.vault.create('Bases/Collection.base', source);
 		await host.app.vault.create('Bases/Unpaired.base', source);
 		// A matching filename without an embed is not a pairing.
@@ -149,7 +227,15 @@ describe('playlist migration service', () => {
 			count === 1 ? ['Bases/Collection.base'] : ['Bases/Collection.base', 'Bases/Second.base']);
 		preview.finish?.(true);
 		await done;
-		expect(await readNote(host.app, 'Bases/Collection.base')).toBe(expected);
+		expect(parse(await readNote(host.app, 'Bases/Collection.base'))).toEqual({
+			filters: { and: ['type == "music"'] },
+			views: [
+				{ type: 'cards', name: 'Player', image: 'note.poster', filters: 'author == "A"',
+					sort: [{ property: 'file.mtime', direction: 'DESC' }], order: ['file.name', 'note.author'] },
+				{ type: 'table', name: 'My table', order: ['file.name'] },
+				{ type: 'cards', name: 'Extra', sort: [], image: 'note.poster' },
+			],
+		});
 		expect(await readNote(host.app, 'Bases/Unpaired.base')).toBe(source);
 		expect(await readNote(host.app, 'Playlists/Mix.base')).toBe(source);
 		expect(notices.at(-1)).toContain(count === 1

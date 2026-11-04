@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, parseYaml, type App, type TFile } from 'obsidian';
+import { getFrontMatterInfo, parseYaml, stringifyYaml, type App, type TFile } from 'obsidian';
 import { LEGACY_TRACKS_KEY } from '../domain/config';
 import { planPlaylistMigration, type MigrationPlaylistInput, type PlaylistMigrationPlan, type PlaylistCardsUpgrade } from '../domain/playlist-migration';
 import { upgradePlaylistCards } from '../domain/base-cards';
@@ -70,9 +70,15 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			if (embeds.needsReview) throw new Error(migrationEmbedReviewReason(embeds));
 			const pairedBase = resolvePlaylistBase(app, file, embeds.embeddedBases);
 			if (pairedBase && !cardsUpgrades.has(pairedBase.path)) {
-				const before = await app.vault.read(pairedBase);
-				const after = upgradePlaylistCards(before, settings.musicThumbnailProperty);
-				if (before !== after) cardsUpgrades.set(pairedBase.path, { notePath: file.path, basePath: pairedBase.path, before, after });
+				try {
+					const before = await app.vault.read(pairedBase);
+					const after = upgradePlaylistCards(before, settings.musicThumbnailProperty, { parse: parseYaml, stringify: stringifyYaml });
+					if (before !== after) cardsUpgrades.set(pairedBase.path, { notePath: file.path, basePath: pairedBase.path, before, after });
+				} catch (error: unknown) {
+					const reason = error instanceof Error ? error.message : String(error);
+					failures.push({ path: pairedBase.path, reason: `Needs review: playlist base YAML could not be upgraded: ${reason}` });
+					continue;
+				}
 			}
 			const embeddedBases = new Set([...embeds.ownedBases, ...embeds.embeddedBases]);
 			let pendingBase: string | undefined;

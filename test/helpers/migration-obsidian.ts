@@ -1,4 +1,5 @@
 import type { Pos } from 'obsidian';
+import { parse } from 'yaml';
 
 type Cache = {
 	frontmatter: Record<string, unknown>;
@@ -255,7 +256,7 @@ export const getFrontMatterInfo = (content: string) => ({
 	from: 4, to: content.indexOf('\n---\n') + 1,
 	contentStart: content.indexOf('\n---\n') + 5,
 });
-export const parseYaml = (value: string): unknown => JSON.parse(value);
+export const parseYaml = (value: string): unknown => parse(value, { stringKeys: true });
 export const stringifyYaml = (value: unknown): string => JSON.stringify(value) + '\n';
 export const parseLinktext = (value: string) => ({
 	path: value.split('#')[0] ?? '', subpath: value.includes('#') ? value.slice(value.indexOf('#')) : '',
