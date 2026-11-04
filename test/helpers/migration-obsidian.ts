@@ -251,7 +251,7 @@ export class App {
 }
 
 export const getFrontMatterInfo = (content: string) => ({
-	exists: content.startsWith('---\n'), frontmatter: content.split('\n')[1] ?? '{}',
+	exists: content.startsWith('---\n'), frontmatter: content.slice(4, content.indexOf('\n---\n')),
 	from: 4, to: content.indexOf('\n---\n') + 1,
 	contentStart: content.indexOf('\n---\n') + 5,
 });

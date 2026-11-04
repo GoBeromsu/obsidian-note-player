@@ -220,7 +220,7 @@ async function clearLegacySetting(run: MigrationRun): Promise<MigrationFailure[]
 	// Inspect the entire vault, not just the configured folder, before forgetting a custom key.
 	for (const file of host.app.vault.getMarkdownFiles()) {
 		try {
-			const content = await host.app.vault.read(file);
+			const content = await host.app.vault.cachedRead(file);
 			signal.throwIfAborted();
 			const info = getFrontMatterInfo(content);
 			let fm: unknown;
