@@ -44,7 +44,16 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 		try {
 			const content = await app.vault.read(file);
 			const info = getFrontMatterInfo(content);
-			const parsed: unknown = info.exists ? parseYaml(info.frontmatter) : {};
+			let parsed: unknown;
+			try {
+				parsed = info.exists ? parseYaml(info.frontmatter) : {};
+			} catch (error: unknown) {
+				if (hasType(app.metadataCache.getFileCache(file)?.frontmatter, settings.playlistNoteType)) {
+					const reason = error instanceof Error ? error.message : String(error);
+					failures.push({ path: file.path, reason: `Needs review: playlist YAML could not be parsed: ${reason}` });
+				}
+				continue;
+			}
 			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
 			const frontmatter = Object.fromEntries(Object.entries(parsed));
 			if (!hasType(frontmatter, settings.playlistNoteType)) continue;

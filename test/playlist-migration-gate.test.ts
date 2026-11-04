@@ -81,6 +81,56 @@ afterEach(() => {
 });
 
 describe('migration gate regressions', () => {
+	it.each(['Templates/meeting.template.md', 'Playlists/meeting.template.md'])(
+		'reports already Bases on rerun with unrelated malformed YAML: %s', async (path) => {
+			const host = await fixture();
+			await run(host);
+			host.settings.legacyPlaylistTrackProperty = 'songs';
+			await host.app.vault.create(path, '---\n{"type":"template"}\n---\n');
+			state(host.app).contents.set(path, '---\n{{participants_yaml}}\n---\n');
+			notices.length = 0;
+
+			await run(host);
+
+			expect(notices).toEqual([NOTICE_CATALOG.migration_already_bases.template]);
+			expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+		},
+	);
+
+	it.each(['Templates/meeting.template.md', 'Playlists/meeting.template.md'])(
+		'completes conversion without unrelated malformed YAML errors: %s', async (path) => {
+			const host = await fixture();
+			await host.app.vault.create(path, '---\n{"type":"template"}\n---\n');
+			state(host.app).contents.set(path, '---\n{{participants_yaml}}\n---\n');
+
+			await run(host);
+
+			expect(notices).toEqual([complete()]);
+			expect(state(host.app).contents.get(notePath)).toContain(migrationEmbedBlock(basePath));
+			expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+		},
+	);
+
+	it('reports malformed legacy candidates once as needs review while others convert', async () => {
+		const host = await fixture();
+		const path = 'Playlists/Broken.md';
+		await host.app.vault.create(path, header);
+		const malformed = '---\n{"type":"music-playlist","songs":[\n---\n';
+		state(host.app).contents.set(path, malformed);
+		const notice = vi.spyOn(noticeService, 'showNotice');
+
+		await run(host);
+
+		expect(notice).toHaveBeenCalledWith('migration_failed', {
+			name: path, reason: expect.stringContaining('Needs review'),
+		});
+		expect(notices.filter((message) => message.includes(path))).toHaveLength(1);
+		expect(notices.at(-1)).toBe(complete());
+		expect(state(host.app).contents.get(notePath)).toContain(migrationEmbedBlock(basePath));
+		expect(state(host.app).contents.get(path)).toBe(malformed);
+		expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+	});
+
 	it('B12 reuses the actual embed after an equal-length edit before attachment', async () => {
 		const host = await fixture();
 		const fake = state(host.app);

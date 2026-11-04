@@ -97,12 +97,12 @@ async function applyMigration(
 ): Promise<void> {
 	const { host, signal, owner } = run;
 	const { app, settings } = host;
-	const { plan: preview, failures } = scan;
+	const { plan: preview } = scan;
 	const progress = new Notice('', 0);
 	let converted = 0;
 	let linked = 0;
 	let missing = 0;
-	const errors = new Set(failures.map(({ path, reason }) => `${path}: ${reason}`));
+	const errors = new Set<string>();
 	try {
 		const playlists = preview.playlists.filter(needsConversion);
 		for (const [index, playlist] of playlists.entries()) {
@@ -223,7 +223,14 @@ async function clearLegacySetting(run: MigrationRun): Promise<MigrationFailure[]
 			const content = await host.app.vault.read(file);
 			signal.throwIfAborted();
 			const info = getFrontMatterInfo(content);
-			const fm: unknown = info.exists ? parseYaml(info.frontmatter) : {};
+			let fm: unknown;
+			try {
+				fm = info.exists ? parseYaml(info.frontmatter) : {};
+			} catch (error: unknown) {
+				// Unreadable YAML may hide the custom key; retain it without blaming unrelated notes.
+				if (error instanceof Error) return [];
+				throw error;
+			}
 			if (fm && typeof fm === 'object' && !Array.isArray(fm)) {
 				const record = Object.fromEntries(Object.entries(fm));
 				if (hasType(record, host.settings.playlistNoteType) && Object.hasOwn(record, key)) return [];
