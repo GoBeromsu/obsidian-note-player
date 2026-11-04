@@ -2,7 +2,7 @@
 
 Play note-backed playlists with YouTube, cached audio, and local files.
 
-![The Note Player view in a sample vault: a playlist card, a turntable with the needle on the record, and a now-playing card for a track by Isaiah 6tyOne.](https://raw.githubusercontent.com/Xia-Ataraxia/obsidian-note-player/main/docs/assets/player.png)
+![The Note Player view in a sample vault: a playlist card, a turntable with the needle on the record, and a now-playing card for a track by Isaiah 6tyOne.](https://raw.githubusercontent.com/GoBeromsu/obsidian-note-player/main/docs/assets/player.png)
 
 Each track is a Markdown note, each playlist is a note listing tracks, and a turntable-style player plays them without leaving your vault.
 
@@ -18,7 +18,7 @@ Each track is a Markdown note, each playlist is a note listing tracks, and a tur
 
 From the Community plugins browser, search for **Note Player**, then install and enable it.
 
-Manual: download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/Xia-Ataraxia/obsidian-note-player/releases/latest), copy them into `<vault>/<config folder>/plugins/note-player/`, then enable the plugin.
+Manual: download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/GoBeromsu/obsidian-note-player/releases/latest), copy them into `<vault>/<config folder>/plugins/note-player/`, then enable the plugin.
 
 ### Requirements
 
