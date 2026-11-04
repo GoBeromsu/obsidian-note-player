@@ -389,7 +389,7 @@ describe('migration gate regressions', () => {
 
 		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual(['Bases/User.base']);
 		expect(fake.contents.get(notePath)).toContain('"songs":');
-		expect(notices.at(-1)).toContain(complete(0, 0));
+		expect(notices.at(-1)).toBe('Playlists/Mix.md: Playlist companion changed after preview. Run the converter again.');
 	});
 
 	it('B6 recovers after base creation and membership interruptions', async () => {

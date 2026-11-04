@@ -20,18 +20,21 @@ export class MigrationPreviewModal extends Modal {
 		const { totals } = this.plan;
 		const playlists = this.plan.playlists.filter((playlist) =>
 			playlist.createBase || playlist.appendEmbed || playlist.renameLegacyKey || playlist.membershipAdds.length > 0);
-		const playlistCount = new Set([
-			...playlists.map((playlist) => playlist.notePath),
-			...(this.plan.cardsUpgrades ?? []).map((upgrade) => upgrade.notePath),
-		]).size;
+		const playlistCount = playlists.length;
+		const baseCount = this.plan.cardsUpgrades?.length ?? 0;
+		const action = playlistCount
+			? `Convert ${plural(playlistCount, 'playlist')}${baseCount ? ` and switch ${plural(baseCount, 'base')} to cards` : ''}`
+			: `Switch ${plural(baseCount, 'playlist base')} to cards`;
 		const missingCount = playlists.reduce((count, playlist) => count + playlist.missing.length, 0);
 		const summary = this.contentEl.createDiv({ cls: 'onp-migration-summary' });
 		const counts = [
-			`${plural(playlistCount, 'playlist')} will convert`,
-			...(this.plan.cardsUpgrades?.length
-				? [`${plural(this.plan.cardsUpgrades.length, 'playlist base')} will switch to the cards view`] : []),
-			`${plural(totals.membershipAdds, 'track')} will be linked`,
-			plural(missingCount, 'missing reference'),
+			...(playlistCount ? [`${plural(playlistCount, 'playlist')} will convert`] : []),
+			...(baseCount
+				? [`${plural(baseCount, 'playlist base')} will switch to the cards view`] : []),
+			...(playlistCount ? [
+				`${plural(totals.membershipAdds, 'track')} will be linked`,
+				plural(missingCount, 'missing reference'),
+			] : []),
 			plural(this.plan.conflicts.length + this.plan.invalid.length, 'skipped', 'skipped'),
 		];
 		for (const count of counts) {
@@ -96,8 +99,8 @@ export class MigrationPreviewModal extends Modal {
 			})
 			.addButton((button) => {
 				this.convertButton = button;
-				button.setButtonText(`Convert ${plural(playlistCount, 'playlist')}`).setCta()
-				.setDisabled(playlistCount === 0).onClick(() => {
+				button.setButtonText(action).setCta()
+				.setDisabled(playlistCount + baseCount === 0).onClick(() => {
 					if (this.confirmed) return;
 					this.confirmed = true;
 					this.cancelButton?.setButtonText('Hide');

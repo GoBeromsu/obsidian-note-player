@@ -163,7 +163,7 @@ describe('settings definitions', () => {
     vi.mocked(convertPlaylistNotes).mockClear();
 
     const action = renderRow(group.items ?? [], 'Legacy playlist notes');
-    expect(action.buttonText).toBe('Convert playlists and bases');
+    expect(action.buttonText).toBe('Convert playlists and switch bases to cards');
     action.click();
 
     expect(convertPlaylistNotes).toHaveBeenCalledTimes(1);

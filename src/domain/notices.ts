@@ -6,7 +6,7 @@ export const NOTICE_CATALOG = {
 	migration_already_bases: { template: 'All playlists already use Bases.' },
 	migration_progress: { template: 'Converting {{name}}...' },
 	migration_complete: { template: 'Converted {{playlists:playlist}}, linked {{tracks:track}}, {{missing}} missing.' },
-	migration_cards_complete: { template: '{{bases:playlist base}} switched to the cards view.' },
+	migration_cards_complete: { template: 'Switched {{bases:playlist base}} to the cards view.' },
 	migration_failed: { template: 'Could not convert {{name}}: {{reason}}' },
 	playlist_created: { template: 'Created playlist {{name}}.' },
 	playlist_loaded: { template: 'Loaded playlist {{name}}.' },
