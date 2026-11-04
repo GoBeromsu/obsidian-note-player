@@ -175,10 +175,10 @@ describe('settings definitions', () => {
       'URL property',
       'Thumbnail property',
       'Artist property',
+      'Music note type',
       'Membership property',
       'Description property',
       'Cover property',
-      'Music note type',
       'Playlist note type',
     ]);
   });

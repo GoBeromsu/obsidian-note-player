@@ -20,7 +20,7 @@ interface PickerCopy {
 const INSTRUCTIONS = [
 	{ command: '↑↓', purpose: 'to navigate' },
 	{ command: '↵', purpose: 'to choose' },
-	{ command: 'shift ↵', purpose: 'to create' },
+	{ command: 'shift ↵', purpose: 'to use typed text' },
 	{ command: 'esc', purpose: 'to dismiss' },
 ];
 

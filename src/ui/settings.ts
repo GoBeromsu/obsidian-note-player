@@ -9,6 +9,7 @@ import {
 	type SettingDefinitionRender,
 } from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING, DEFAULT_SETTINGS, normalizeSettingValue, VAULT_ROOT } from '../domain/config';
+import type { NoticeId } from '../domain/notices';
 import { folderLabel } from '../domain/settings-options';
 import { convertPlaylistNotes } from '../services/playlist-migration-service';
 import { ensureFolder } from '../services/vault-io';
@@ -139,6 +140,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 					this.pickerRow('URL property', 'Frontmatter key used for the YouTube URL.', 'musicUrlProperty', property),
 					this.pickerRow('Thumbnail property', 'Frontmatter key that receives the video thumbnail when a track is imported.', 'musicThumbnailProperty', property),
 					this.pickerRow('Artist property', 'Frontmatter key used for artist or author metadata.', 'musicArtistProperty', property),
+					this.pickerRow('Music note type', 'The type value that marks a note as a music track.', 'musicNoteType', typeValue),
 				],
 			},
 			{
@@ -148,7 +150,6 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 					this.pickerRow('Membership property', 'Frontmatter key on a track that links the playlists it belongs to.', 'playlistMembershipProperty', property),
 					this.pickerRow('Description property', 'Frontmatter key used for playlist description text.', 'playlistDescriptionProperty', property),
 					this.pickerRow('Cover property', 'Frontmatter key used for playlist cover artwork.', 'playlistCoverProperty', property),
-					this.pickerRow('Music note type', 'The type value that marks a note as a music track.', 'musicNoteType', typeValue),
 					this.pickerRow('Playlist note type', 'The type value that marks a note as a playlist.', 'playlistNoteType', typeValue),
 				],
 			},
@@ -162,7 +163,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						render: (setting) => {
 							setting.addButton((button) =>
 								button.setButtonText('Refresh').onClick(() => {
-									void this.host.refreshCompanionBases();
+									void runBusy(button, 'Refreshing…', 'bases_refresh_failed', () => this.host.refreshCompanionBases());
 								}),
 							);
 						},
@@ -199,18 +200,10 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	private async clearThumbnails(button: ButtonComponent): Promise<void> {
 		const cache = this.host.getThumbnailCache();
 		if (!cache) return;
-		button.setDisabled(true).setButtonText('Clearing…');
-		button.buttonEl.addClass('onp-is-busy');
-		try {
+		await runBusy(button, 'Clearing…', 'thumbnail_cache_clear_failed', async () => {
 			await cache.clear();
 			showNotice('thumbnail_cache_cleared');
-		} catch (error) {
-			console.error('[Note Player] Could not clear the thumbnail cache', error);
-			showNotice('thumbnail_cache_clear_failed');
-		} finally {
-			button.buttonEl.removeClass('onp-is-busy');
-			button.setDisabled(false).setButtonText('Clear');
-		}
+		});
 	}
 
 	// The setting only moves once the folder exists, so a failed create leaves the previous choice intact.
@@ -251,6 +244,19 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 			button.buttonEl.setAttr('aria-haspopup', 'dialog');
 			sync();
 		});
+	}
+}
+
+async function runBusy(button: ButtonComponent, busyText: string, failure: NoticeId, task: () => Promise<void>): Promise<void> {
+	const idleText = button.buttonEl.getText();
+	button.setDisabled(true).setButtonText(busyText);
+	try {
+		await task();
+	} catch (error) {
+		console.error('[Note Player]', failure, error);
+		showNotice(failure);
+	} finally {
+		button.setDisabled(false).setButtonText(idleText);
 	}
 }
 
