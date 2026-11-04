@@ -1,5 +1,4 @@
 import type { PeaksStore } from '../services/peaks-store';
-import type { PlaylistNote } from './music';
 import type { PlaybackState, RepeatMode } from './playback';
 import type { TurntableStyle } from './settings';
 
@@ -62,8 +61,6 @@ export interface PlaylistViewHost {
 	getState(): PlaylistViewState;
 	subscribe(onChange: () => void): () => void;
 	onStateChange(onChange: () => void): () => void;
-	getPlaylistByPath(path: string): PlaylistNote | null;
-	playPlaylist(companionPath: string, startTrackPath: string | null): Promise<void>;
 	refresh(notify?: boolean): Promise<void>;
 	selectPlaylist(path: string | null): Promise<void>;
 	selectActivePlaylist?(): Promise<void>;

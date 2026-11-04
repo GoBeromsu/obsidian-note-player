@@ -19,13 +19,14 @@ export function renderRow(rows: Row[], name: string) {
 	let value = '';
 	let change: ((next: string) => unknown) | null = null;
 	let click: (() => unknown) | null = null;
+	let buttonText = '';
 	const dropdown = {
 		addOption: (optionValue: string, label: string) => { added.push([optionValue, label]); return dropdown; },
 		setValue: (next: string) => { value = next; return dropdown; },
 		onChange: (cb: (next: string) => unknown) => { change = cb; return dropdown; },
 	};
 	const button = {
-		setButtonText: (_text: string) => button,
+		setButtonText: (text: string) => { buttonText = text; return button; },
 		onClick: (cb: () => unknown) => { click = cb; return button; },
 	};
 	const setting = {
@@ -33,5 +34,5 @@ export function renderRow(rows: Row[], name: string) {
 		addButton: (cb: (component: typeof button) => unknown) => { cb(button); return setting; },
 	};
 	row.render(setting as unknown as Setting, {} as SettingGroup);
-	return { added, value, change: (next: string) => change?.(next), click: () => click?.() };
+	return { added, value, buttonText, change: (next: string) => change?.(next), click: () => click?.() };
 }

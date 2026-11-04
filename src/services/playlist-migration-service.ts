@@ -11,7 +11,7 @@ import { MigrationPreviewModal } from '../ui/views/MigrationPreviewModal';
 import { collectMigrationPlan, MIGRATION_BASE_MARKER, type MigrationFailure, type MigrationScan } from './playlist-migration-plan';
 import { withMetadataSettled } from './vault-io';
 import { alreadyConverted, convertMigrationContent, migrationEmbeds, migrationFrontmatter } from './migration-content';
-import { resolveEmbeddedFile } from './embed-resolution';
+import { resolveEmbeddedFile, resolvePlaylistBase } from './embed-resolution';
 
 interface MigrationHost extends Pick<Component, 'addChild' | 'removeChild'> {
 	readonly app: App;
@@ -56,7 +56,7 @@ async function previewMigration(run: MigrationRun): Promise<void> {
 	signal.throwIfAborted();
 	const { plan, failures } = scan;
 	for (const { path: name, reason } of failures) showNotice('migration_failed', { name, reason });
-	if (!plan.totals.playlists && !plan.conflicts.length && !plan.invalid.length) {
+	if (!plan.totals.playlists && !plan.cardsUpgrades?.length && !plan.conflicts.length && !plan.invalid.length) {
 		if (failures.length) return;
 		const noOpSettings = { ...host.settings };
 		const cleanup = await clearLegacySetting(run);
@@ -99,9 +99,10 @@ async function applyMigration(
 	const { app, settings } = host;
 	const { plan: preview } = scan;
 	const progress = new Notice('', 0);
-	let converted = 0;
+	const converted = new Set<string>();
 	let linked = 0;
 	let missing = 0;
+	let upgraded = 0;
 	const errors = new Set<string>();
 	try {
 		const playlists = preview.playlists.filter(needsConversion);
@@ -191,7 +192,7 @@ async function applyMigration(
 					|| key !== 'tracks_legacy' && Object.hasOwn(fm, key)) {
 					throw new Error('Companion embed or archive was not preserved. Run the converter again.');
 				}
-				converted++;
+				converted.add(playlist.notePath);
 				missing += playlist.missing.length;
 				reportProgress(index + 1, playlists.length, playlist.notePath, 'converted');
 			} catch (error: unknown) {
@@ -202,12 +203,43 @@ async function applyMigration(
 				showNotice('migration_failed', { name: playlist.notePath, reason });
 			}
 		}
+		for (const upgrade of preview.cardsUpgrades ?? []) {
+			signal.throwIfAborted();
+			reportProgress(upgraded + 1, preview.cardsUpgrades?.length ?? 0, upgrade.basePath, 'converting');
+			try {
+				const note = app.vault.getFileByPath(upgrade.notePath);
+				const content = note ? await app.vault.read(note) : '';
+				const embeds = migrationEmbeds(content, { app, notePath: upgrade.notePath });
+				const base = note && !embeds.needsReview && resolvePlaylistBase(app, note, embeds.embeddedBases);
+				if (!base || base.path !== upgrade.basePath
+					|| !hasType(migrationFrontmatter(content), settings.playlistNoteType)) {
+					throw new Error('Playlist pairing changed after preview. Run the converter again.');
+				}
+				await app.vault.process(base, (content) => {
+					signal.throwIfAborted();
+					if (content !== upgrade.before) throw new Error('Playlist base changed after preview. Run the converter again.');
+					return upgrade.after;
+				});
+				upgraded++;
+				converted.add(upgrade.notePath);
+				reportProgress(upgraded, preview.cardsUpgrades?.length ?? 0, upgrade.basePath, 'converted');
+			} catch (error: unknown) {
+				if (signal.aborted) throw error;
+				const reason = error instanceof Error ? error.message : String(error);
+				errors.add(`${upgrade.basePath}: ${reason}`);
+				reportProgress(upgraded + 1, preview.cardsUpgrades?.length ?? 0, upgrade.basePath, 'failed');
+				showNotice('migration_failed', { name: upgrade.basePath, reason });
+			}
+		}
 		for (const { path, reason } of await clearLegacySetting(run)) errors.add(`${path}: ${reason}`);
 		signal.throwIfAborted();
 	} finally {
 		progress.hide();
 	}
-	const summary = renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: converted, tracks: linked, missing });
+	const summary = [
+		renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: converted.size, tracks: linked, missing }),
+		...(upgraded ? [renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: upgraded })] : []),
+	].join('\n');
 	const skipped = [...preview.conflicts, ...preview.invalid];
 	new Notice([summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n'));
 }

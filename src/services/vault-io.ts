@@ -1,4 +1,4 @@
-import { Component, normalizePath, parseYaml, TFile, TFolder, type App, type CachedMetadata } from 'obsidian';
+import { Component, normalizePath, parseYaml, TFile, type App, type CachedMetadata } from 'obsidian';
 import type { CompanionBaseFile } from '../domain/base-files';
 import { VAULT_ROOT } from '../domain/config';
 import { collectScopedFiles } from '../domain/music-scope';
@@ -6,7 +6,7 @@ import { uniqueName } from '../utils/dedupe';
 import { hasType } from '../utils/frontmatter';
 import type { MarkdownNoteSnapshot } from '../types/notes';
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
-import { resolveEmbeddedFile } from './embed-resolution';
+import { resolveEmbeddedFile, resolvePlaylistBase } from './embed-resolution';
 
 export async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	let current = '';
@@ -130,19 +130,13 @@ const isMarkdown = (file: unknown): file is TFile => file instanceof TFile && fi
 
 /** Selected folders include all descendants; backlink members can also come from outside that scope. */
 export function collectMusicFiles(app: App, folders: string[], playlistNoteType?: string): TFile[] {
-	const roots = folders
-		.map((path) => path === VAULT_ROOT ? app.vault.getRoot() : app.vault.getFolderByPath(normalizePath(path)))
-		.filter((folder): folder is TFolder => folder !== null)
-		.map((folder) => ({ folder, isVaultRoot: folder.isRoot() }));
-	const scoped = collectScopedFiles<TFolder, TFile>(roots, {
-		children: (folder) => ({
-			folders: folder.children.filter((child): child is TFolder => child instanceof TFolder),
-			files: folder.children.filter(isMarkdown),
-		}),
-		linked: (file) => (app.metadataCache.getFileCache(file)?.frontmatterLinks ?? [])
+	const scoped = collectScopedFiles(
+		app.vault.getMarkdownFiles(),
+		folders.map((path) => path === VAULT_ROOT ? VAULT_ROOT : normalizePath(path)),
+		(file) => (app.metadataCache.getFileCache(file)?.frontmatterLinks ?? [])
 			.map((link) => app.metadataCache.getFirstLinkpathDest(link.link, file.path))
 			.filter(isMarkdown),
-	});
+	);
 	if (playlistNoteType === undefined) return scoped;
 	const companions = new Set(scoped.filter((file) => {
 		const cache = app.metadataCache.getFileCache(file);
@@ -167,10 +161,8 @@ export function collectNoteSnapshots(app: App, folders: string[], mapping: Youtu
 			const key = link.key.split('.')[0];
 			if (target && key) (frontmatterLinks[key] ??= []).push(target.path);
 		}
-		const embeddedBases = (cache?.embeds ?? [])
-			.map((embed) => resolveEmbeddedFile(app, embed.link, file.path))
-			.filter((target): target is TFile => target !== null && target.extension === 'base')
-			.map((target) => target.path);
+		const base = resolvePlaylistBase(app, file);
+		const embeddedBases = base ? [base.path] : [];
 		return {
 			path: file.path,
 			basename: file.basename,

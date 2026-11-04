@@ -1,10 +1,12 @@
-import { getFrontMatterInfo, parseYaml, type App, type TFile } from 'obsidian';
+import { getFrontMatterInfo, parseYaml, stringifyYaml, type App, type TFile } from 'obsidian';
 import { LEGACY_TRACKS_KEY } from '../domain/config';
-import { planPlaylistMigration, type MigrationPlaylistInput, type PlaylistMigrationPlan } from '../domain/playlist-migration';
+import { planPlaylistMigration, type MigrationPlaylistInput, type PlaylistMigrationPlan, type PlaylistCardsUpgrade } from '../domain/playlist-migration';
+import { upgradePlaylistCards } from '../domain/base-cards';
 import type { NotePlayerSettings } from '../types/settings';
 import { hasType } from '../utils/frontmatter';
 import { parsePlaylistTrackReference } from '../utils/wikilink';
 import { migrationEmbeds, migrationEmbedReviewReason } from './migration-content';
+import { resolvePlaylistBase } from './embed-resolution';
 
 // A base created before an interrupted conversion must be recoverable without claiming a user's base.
 export const MIGRATION_BASE_MARKER = '# note-player migration for: ';
@@ -27,6 +29,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 	const rawCandidate = new RegExp(`(?:^[ \\t]*(?:#[ \\t]*)?(?:-[ \\t]+)?|[{,][ \\t]*)["']?(?:${escapePattern(legacyKey)}["']?[ \\t]*:|type["']?[ \\t]*:\\s*["']?${escapePattern(settings.playlistNoteType)}["']?(?=[\\s,}]|$))`, 'm');
 	const folder = settings.playlistFolder.replace(/^\/|\/$/g, '');
 	const playlists: MigrationPlaylistInput[] = [];
+	const cardsUpgrades = new Map<string, PlaylistCardsUpgrade>();
 	const failures: MigrationFailure[] = [];
 	const candidates: TFile[] = [];
 	const frontmatters = new Map<string, Record<string, unknown>>();
@@ -65,6 +68,18 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			const refs: unknown[] = Array.isArray(raw) ? raw : [];
 			const embeds = migrationEmbeds(content, { app, notePath: file.path });
 			if (embeds.needsReview) throw new Error(migrationEmbedReviewReason(embeds));
+			const pairedBase = resolvePlaylistBase(app, file, embeds.embeddedBases);
+			if (pairedBase && !cardsUpgrades.has(pairedBase.path)) {
+				try {
+					const before = await app.vault.read(pairedBase);
+					const after = upgradePlaylistCards(before, settings.musicThumbnailProperty, { parse: parseYaml, stringify: stringifyYaml });
+					if (before !== after) cardsUpgrades.set(pairedBase.path, { notePath: file.path, basePath: pairedBase.path, before, after });
+				} catch (error: unknown) {
+					const reason = error instanceof Error ? error.message : String(error);
+					failures.push({ path: pairedBase.path, reason: `Needs review: playlist base YAML could not be upgraded: ${reason}` });
+					continue;
+				}
+			}
 			const embeddedBases = new Set([...embeds.ownedBases, ...embeds.embeddedBases]);
 			let pendingBase: string | undefined;
 			if (!embeddedBases.size) {
@@ -103,7 +118,10 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 		}
 	}
 	return {
-		plan: planPlaylistMigration({ playlists, trackMembership: membership, mapping: settings, existingPaths }),
+		plan: {
+			...planPlaylistMigration({ playlists, trackMembership: membership, mapping: settings, existingPaths }),
+			cardsUpgrades: [...cardsUpgrades.values()],
+		},
 		failures,
 		candidates,
 		frontmatter: frontmatters,

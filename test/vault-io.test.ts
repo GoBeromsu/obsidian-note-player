@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App, TFile, TFolder, type CachedMetadata, type TAbstractFile } from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING, DEFAULT_SETTINGS } from '../src/domain/config';
 import { buildMusicLibrary } from '../src/domain/library-index';
@@ -25,6 +25,7 @@ vi.mock('obsidian', () => {
     parseYaml: (content: string) => JSON.parse(content),
     App: class {
       vault = {
+        getMarkdownFiles: () => [...storage.files.values()].filter((file) => file instanceof TFile && Reflect.get(file, 'extension') === 'md'),
         getRoot: () => storage.files.get('/'),
         getFolderByPath: (path: string) => storage.files.get(path) ?? null,
         getFileByPath: (path: string) => storage.files.get(path) ?? null,
@@ -60,8 +61,25 @@ function note(path: string, cache: CachedMetadata = {}): TFile {
 const position = { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 0, offset: 0 } };
 
 beforeEach(() => { storage.files.clear(); storage.caches.clear(); storage.contents.clear(); storage.links.clear(); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe('vault library snapshots', () => {
+  it('discovers notes from the metadata cache without folder traversal or note reads', () => {
+    const app = new App();
+    const root = vi.spyOn(app.vault, 'getRoot').mockImplementation(() => { throw new Error('No folder walk'); });
+    const folder = vi.spyOn(app.vault, 'getFolderByPath').mockImplementation(() => { throw new Error('No folder walk'); });
+    const read = vi.spyOn(app.vault, 'cachedRead');
+    note('Music/Nested/Song.md', { frontmatter: { type: 'music', source: 'https://youtu.be/dQw4w9WgXcQ' } });
+    note('Musician/Excluded.md');
+
+    const snapshots = collectNoteSnapshots(app, ['Music'], DEFAULT_PROPERTY_MAPPING);
+
+    expect(snapshots.map((entry) => entry.path)).toEqual(['Music/Nested/Song.md']);
+    expect(root).not.toHaveBeenCalled();
+    expect(folder).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it.each(['playlistFolder', 'musicFolder'] as const)('discovers nested playlists and music when %s is vault root', (key) => {
     const root = folder('/');
     const nested = folder('Nested');

@@ -4,7 +4,7 @@ import type { YoutubePlaylistPropertyMapping } from '../types/settings';
 import { hasType, asStringArray, asTrimmedString } from '../utils/frontmatter';
 import { buildYoutubeThumbnailUrl, buildYoutubeWatchUrl, extractYoutubeVideoId } from '../utils/youtube';
 import { linkDisplayText } from '../utils/wikilink';
-import { parseNotePlayerSort, sortTracks } from './base-sort';
+import { parseBaseSort, sortTracks } from './base-sort';
 import { isUnavailable } from './track-import';
 
 export function buildMusicLibrary(
@@ -33,7 +33,7 @@ export function buildMusicLibrary(
     if (!basePath) continue;
     const members = sortTracks(
       [...(membersByPlaylist.get(note.path) ?? [])],
-      parseNotePlayerSort(baseConfigs.get(basePath)),
+      parseBaseSort(baseConfigs.get(basePath)),
       snapshotsByPath,
     );
     playlists.push({

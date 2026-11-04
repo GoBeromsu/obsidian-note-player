@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseNotePlayerSort } from '../src/domain/base-sort';
+import { parseBaseSort } from '../src/domain/base-sort';
 
-describe('parseNotePlayerSort', () => {
-  it('reads only the first Note Player view and ignores unsupported properties', () => {
-    expect(parseNotePlayerSort({ views: [
-      { type: 'table', sort: [{ property: 'file.name', direction: 'DESC' }] },
-      { type: 'note-player', sort: [
+describe('parseBaseSort', () => {
+  it('reads only the first view regardless of its type', () => {
+    expect(parseBaseSort({ views: [
+      { type: 'cards', sort: [
         { property: 'note.date_created', direction: 'DESC' },
         { property: 'formula.x', direction: 'ASC' },
         { property: 'file.mtime', direction: 'ASC' },
@@ -17,6 +16,13 @@ describe('parseNotePlayerSort', () => {
     ]);
   });
 
+  it('does not borrow sorting from a later view when the first has none', () => {
+    expect(parseBaseSort({ views: [
+      { type: 'cards' },
+      { type: 'note-player', sort: [{ property: 'file.name', direction: 'DESC' }] },
+    ] })).toEqual([]);
+  });
+
   it.each([
     undefined, null, false, 1, 'config', [],
     {}, { views: null }, { views: [null, 'view'] },
@@ -26,6 +32,6 @@ describe('parseNotePlayerSort', () => {
       { property: 'file.name', direction: 'desc' }, { property: 'note.', direction: 'ASC' },
     ] }] },
   ])('ignores malformed config or sort entries %j', (config) => {
-    expect(parseNotePlayerSort(config)).toEqual([]);
+    expect(parseBaseSort(config)).toEqual([]);
   });
 });

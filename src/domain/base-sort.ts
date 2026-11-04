@@ -15,9 +15,9 @@ function isSortProperty(value: unknown): value is SortRule['property'] {
     || (typeof value === 'string' && value.startsWith('note.') && value.length > 5);
 }
 
-export function parseNotePlayerSort(config: unknown): SortRule[] {
+export function parseBaseSort(config: unknown): SortRule[] {
   if (!isRecord(config) || !Array.isArray(config.views)) return [];
-  const view: unknown = config.views.find((entry: unknown) => isRecord(entry) && entry.type === 'note-player');
+  const view: unknown = config.views[0];
   if (!isRecord(view) || !Array.isArray(view.sort)) return [];
   const rules: SortRule[] = [];
   for (const entry of view.sort) {

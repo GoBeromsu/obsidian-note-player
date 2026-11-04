@@ -80,6 +80,15 @@ describe('migration content decisions', () => {
 	});
 
 	it.each([
+		{ fm: { type: 'music-playlist' }, converted: true },
+		{ fm: { type: 'music-playlist', songs: [] }, converted: false },
+		{ fm: { type: 'music-playlist', tracks_legacy: 'invalid' }, converted: false },
+		{ fm: { type: 'music-playlist', tracks_legacy: [] }, converted: true },
+	])('recognizes native companions without accepting incomplete legacy lists: $fm', ({ fm, converted }) => {
+		expect(alreadyConverted(`---\n${JSON.stringify(fm)}\n---\n![[${base}]]`, source, edit.settings)).toBe(converted);
+	});
+
+	it.each([
 		{ body: '![[Bases/Mix.base]]', converted: true },
 		{ body: '%% note-player:playlist-base %%\n![[Bases/Mix.base]]', converted: true },
 		{ body: '%% note-player:playlist-base %%\n\n![[Bases/Mix.base]]', converted: false },

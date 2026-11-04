@@ -4,6 +4,7 @@ import {
   createPlaylistsOverviewContent, getCompanionBaseFolder,
 } from '../src/domain/base-files';
 import { DEFAULT_PROPERTY_MAPPING } from '../src/domain/config';
+import { parse } from 'yaml';
 
 describe('companion base files', () => {
   it('places base files beside the playlist folder by default', () => {
@@ -64,8 +65,12 @@ describe('playlist base content', () => {
       '    - "type == \\"music\\""',
       `    - ${JSON.stringify(expression)}`,
       'views:',
-      '  - type: note-player',
-      '    name: "Player"',
+      '  - type: cards',
+      '    name: "Cards"',
+      '    image: note.image',
+      '    sort:',
+      '      - property: file.name',
+      '        direction: ASC',
       '    order:',
       '      - file.name',
       '      - note.author',
@@ -77,6 +82,19 @@ describe('playlist base content', () => {
       '      - source',
       '',
     ]);
+  });
+
+  it('binds native cards to the configured image and author properties', () => {
+    const content = createPlaylistBaseContent({
+      ...DEFAULT_PROPERTY_MAPPING, musicThumbnailProperty: 'album art', musicArtistProperty: 'performer',
+    });
+    expect(parse(content)).toMatchObject({
+      views: [
+        { type: 'cards', image: 'note.album art', order: ['file.name', 'note.performer'],
+          sort: [{ property: 'file.name', direction: 'ASC' }] },
+        { type: 'table' },
+      ],
+    });
   });
 
   it.each([createMusicBaseContent, createPlaylistBaseContent, createPlaylistsOverviewContent])(
@@ -97,7 +115,7 @@ describe('playlist base content', () => {
   it('omits empty optional columns without substituting defaults', () => {
     const content = createPlaylistBaseContent({ ...DEFAULT_PROPERTY_MAPPING, musicArtistProperty: '' });
 
-    expect(content.split('\n').filter((line) => line.startsWith('      - '))).toEqual([
+    expect(content.split('\n').filter((line) => /^ {6}- (?!property:)/.test(line))).toEqual([
       '      - file.name', '      - file.name', '      - source',
     ]);
   });

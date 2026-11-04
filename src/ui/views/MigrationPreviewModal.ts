@@ -20,10 +20,16 @@ export class MigrationPreviewModal extends Modal {
 		const { totals } = this.plan;
 		const playlists = this.plan.playlists.filter((playlist) =>
 			playlist.createBase || playlist.appendEmbed || playlist.renameLegacyKey || playlist.membershipAdds.length > 0);
+		const playlistCount = new Set([
+			...playlists.map((playlist) => playlist.notePath),
+			...(this.plan.cardsUpgrades ?? []).map((upgrade) => upgrade.notePath),
+		]).size;
 		const missingCount = playlists.reduce((count, playlist) => count + playlist.missing.length, 0);
 		const summary = this.contentEl.createDiv({ cls: 'onp-migration-summary' });
 		const counts = [
-			`${plural(totals.playlists, 'playlist')} will convert`,
+			`${plural(playlistCount, 'playlist')} will convert`,
+			...(this.plan.cardsUpgrades?.length
+				? [`${plural(this.plan.cardsUpgrades.length, 'playlist base')} will switch to the cards view`] : []),
 			`${plural(totals.membershipAdds, 'track')} will be linked`,
 			plural(missingCount, 'missing reference'),
 			plural(this.plan.conflicts.length + this.plan.invalid.length, 'skipped', 'skipped'),
@@ -65,6 +71,13 @@ export class MigrationPreviewModal extends Modal {
 				references.setAttr('aria-label', playlist.missing.join(', '));
 			}
 		}
+		for (const upgrade of this.plan.cardsUpgrades ?? []) {
+			const row = this.playlistRow(upgrade.basePath, false);
+			const status = row.nameEl.createSpan({ cls: 'onp-migration-status is-ready' });
+			this.status(status, 'layout-grid', 'Will switch to cards');
+			this.rows.set(upgrade.basePath, status);
+			row.descEl.createDiv({ text: 'Filters, sorting, and other views stay unchanged.' });
+		}
 		for (const path of this.plan.conflicts) {
 			const row = this.playlistRow(path, true);
 			this.status(row.nameEl.createSpan({ cls: 'onp-migration-status is-warning' }), 'triangle-alert', 'Conflict \u00b7 skipped');
@@ -83,8 +96,8 @@ export class MigrationPreviewModal extends Modal {
 			})
 			.addButton((button) => {
 				this.convertButton = button;
-				button.setButtonText(`Convert ${plural(totals.playlists, 'playlist')}`).setCta()
-				.setDisabled(totals.playlists === 0).onClick(() => {
+				button.setButtonText(`Convert ${plural(playlistCount, 'playlist')}`).setCta()
+				.setDisabled(playlistCount === 0).onClick(() => {
 					if (this.confirmed) return;
 					this.confirmed = true;
 					this.cancelButton?.setButtonText('Hide');
