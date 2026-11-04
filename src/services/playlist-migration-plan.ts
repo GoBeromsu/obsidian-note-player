@@ -31,6 +31,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 	const folder = settings.playlistFolder.replace(/^\/|\/$/g, '');
 	const playlists: MigrationPlaylistInput[] = [];
 	const cardsUpgrades = new Map<string, PlaylistCardsUpgrade>();
+	const failedBases = new Set<string>();
 	const failures: MigrationFailure[] = [];
 	const candidates: TFile[] = [];
 	const frontmatters = new Map<string, Record<string, unknown>>();
@@ -70,12 +71,14 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			const embeds = migrationEmbeds(content, { app, notePath: file.path });
 			if (embeds.needsReview) throw new Error(migrationEmbedReviewReason(embeds));
 			const pairedBase = resolvePlaylistBase(app, file, embeds.embeddedBases);
+			if (pairedBase && failedBases.has(pairedBase.path)) continue;
 			if (pairedBase && !cardsUpgrades.has(pairedBase.path)) {
 				try {
 					const before = await app.vault.read(pairedBase);
 					const after = upgradePlaylistCards(before, settings, { parse: parseYaml, stringify: stringifyYaml });
 					if (before !== after) cardsUpgrades.set(pairedBase.path, { notePath: file.path, basePath: pairedBase.path, before, after });
 				} catch (error: unknown) {
+					failedBases.add(pairedBase.path);
 					warnUnreadableBase(app, pairedBase.path, error);
 					const reason = error instanceof Error ? error.message : String(error);
 					failures.push({ path: pairedBase.path, reason: `Needs review: playlist base YAML could not be upgraded: ${reason}` });

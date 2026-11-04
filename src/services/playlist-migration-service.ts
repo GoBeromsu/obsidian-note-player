@@ -245,7 +245,8 @@ async function applyMigration(
 		...(upgraded ? [renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: upgraded })] : []),
 	];
 	const skipped = [...preview.conflicts, ...preview.invalid];
-	new Notice([...summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n'));
+	const message = [...summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n');
+	if (message) new Notice(message);
 }
 
 async function clearLegacySetting(run: MigrationRun): Promise<MigrationFailure[]> {

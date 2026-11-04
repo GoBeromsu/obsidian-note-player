@@ -12,21 +12,26 @@ export function upgradePlaylistCards(
 ): string {
 	const original = yaml.parse(content);
 	if (!isRecord(original) || !Array.isArray(original.views)) return content;
+	const properties: Record<string, unknown> = { ...(isRecord(original.properties) ? original.properties : {}) };
+	for (const [property, displayName] of Object.entries({
+		'file.name': 'Title',
+		...(mapping.musicArtistProperty ? { [`note.${mapping.musicArtistProperty}`]: 'Artist' } : {}),
+	})) {
+		const existing = properties[property];
+		properties[property] = { displayName, ...(isRecord(existing) ? existing : {}) };
+	}
 	let changed = false;
 	const intended = {
 		...original,
-		properties: {
-			'file.name': { displayName: 'Title' },
-			...(mapping.musicArtistProperty ? { [`note.${mapping.musicArtistProperty}`]: { displayName: 'Artist' } } : {}),
-			...(isRecord(original.properties) ? original.properties : {}),
-		},
+		properties,
 		views: original.views.map((view: unknown) => {
 			if (!isRecord(view) || view.type !== 'note-player') return view;
 			changed = true;
 			return {
+				imageFit: '', imageAspectRatio: 0.5625,
 				...view,
 				...(view.name === 'Player' ? { name: 'Cards' } : {}),
-				type: 'cards', image: `note.${mapping.musicThumbnailProperty}`, imageFit: '', imageAspectRatio: 0.5625,
+				type: 'cards', image: `note.${mapping.musicThumbnailProperty}`,
 			};
 		}),
 	};

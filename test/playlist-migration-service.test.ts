@@ -124,6 +124,27 @@ describe('playlist migration service', () => {
 			: 'Switched 2 playlist bases to the cards view.');
 	});
 
+	it('does not create an empty final notice when conversion completes externally during preview', async () => {
+		const host = await fixture('tracks');
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () => '---\n{"type":"music-playlist","tracks":[]}\n---\n');
+		const { done } = await openPreview(host);
+		await host.app.vault.create('Playlists/Mix.base', 'views: [{type: cards, name: Cards}]\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Playlists/Mix.base]]\n');
+		const notice = vi.spyOn(obsidian, 'Notice');
+		const write = vi.spyOn(host.app.vault, 'process');
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notice.mock.calls.every(([message]) => typeof message === 'string' && message.trim().length > 0)).toBe(true);
+		expect(notice.mock.calls).toHaveLength(1);
+		expect(notices).toEqual([]);
+		expect(write).not.toHaveBeenCalled();
+	});
+
 	it.each(['>-', '|-'])('preserves parsed base data with %s block scalars, comments, quoted keys, and other views', async (style) => {
 		const host = await fixture();
 		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
@@ -194,6 +215,33 @@ filters:
 		}
 		expect(warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Bases/Broken.base'), expect.any(Error));
 		expect(warning.mock.calls[0]?.[1]).toHaveProperty('message', expect.stringContaining('\n'));
+	});
+
+	it('reports each shared unreadable base once per run while upgrading unrelated bases', async () => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.create('Bases/Good.base', 'views: [{type: note-player, name: Player}]\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist"}\n---\n![[Bases/Good.base]]\n');
+		for (const name of ['Broken', 'Other']) await host.app.vault.create(`Bases/${name}.base`, 'views: [');
+		for (const [name, base] of [['A', 'Broken'], ['B', 'Broken'], ['C', 'Other']]) {
+			await host.app.vault.create(`Playlists/${name}.md`,
+				`---\n{"type":"music-playlist"}\n---\n![[Bases/${base}.base]]\n`);
+		}
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notices).toEqual([
+			renderNotice(NOTICE_CATALOG.base_unreadable.template, { name: 'Broken.base' }),
+			renderNotice(NOTICE_CATALOG.base_unreadable.template, { name: 'Other.base' }),
+			renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: 1 }),
+		]);
+		expect(warning).toHaveBeenCalledTimes(2);
+		expect(parse(await readNote(host.app, 'Bases/Good.base')).views[0].type).toBe('cards');
 	});
 
 	it.each(['views: [', 'views: []'])('writes nothing when serialized YAML is invalid or changes data: %s', async (serialized) => {

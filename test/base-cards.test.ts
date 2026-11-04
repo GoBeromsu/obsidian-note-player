@@ -47,7 +47,35 @@ describe('playlist cards upgrade', () => {
 
 		expect(result).toMatchObject({
 			properties: { 'file.name': { displayName: 'Song' }, 'note.performer': { displayName: 'Band' }, 'note.rating': { displayName: 'Stars' } },
-			views: [{ imageFit: '', imageAspectRatio: 0.5625 }],
+			views: [{ imageFit: 'contain', imageAspectRatio: 1 }],
+		});
+	});
+
+	it.each([
+		{ label: 'fit only', options: { imageFit: 'contain' }, expected: { imageFit: 'contain', imageAspectRatio: 0.5625 } },
+		{ label: 'ratio only', options: { imageAspectRatio: 0.75 }, expected: { imageFit: '', imageAspectRatio: 0.75 } },
+		{ label: 'explicit cover', options: { imageFit: '', imageAspectRatio: 1.25 }, expected: { imageFit: '', imageAspectRatio: 1.25 } },
+	])('adds only missing card image options: $label', ({ options, expected }) => {
+		const source = stringify({ views: [{ type: 'note-player', ...options }] });
+
+		const result = parse(upgradePlaylistCards(source, DEFAULT_PROPERTY_MAPPING, { parse, stringify }));
+
+		expect(result.views).toEqual([{ type: 'cards', image: 'note.image', ...expected }]);
+	});
+
+	it('fills missing display names without replacing property metadata or empty labels', () => {
+		const source = stringify({
+			properties: { 'file.name': { width: 240 }, 'note.performer': {}, 'note.rating': { displayName: '' } },
+			views: [{ type: 'note-player' }],
+		});
+
+		const result = parse(upgradePlaylistCards(source,
+			{ ...DEFAULT_PROPERTY_MAPPING, musicArtistProperty: 'performer' }, { parse, stringify }));
+
+		expect(result.properties).toEqual({
+			'file.name': { displayName: 'Title', width: 240 },
+			'note.performer': { displayName: 'Artist' },
+			'note.rating': { displayName: '' },
 		});
 	});
 
