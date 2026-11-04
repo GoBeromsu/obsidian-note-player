@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App, Component, Notice } from 'obsidian';
+import { App, Component } from 'obsidian';
 import * as obsidian from 'obsidian';
 import { parse } from 'yaml';
 import { DEFAULT_SETTINGS } from '../src/domain/config';
@@ -91,9 +91,11 @@ describe('playlist migration service', () => {
 		}
 		const { done } = await openPreview(host);
 
+		const notice = vi.spyOn(obsidian, 'Notice');
 		preview.finish?.(true);
 		await done;
 
+		expect(notice.mock.calls.every(([message]) => typeof message === 'string' && message.trim().length > 0)).toBe(true);
 		expect(notices.at(-1)).toBe(count === 1
 			? 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 1 playlist base to the cards view.'
 			: 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 2 playlist bases to the cards view.');
@@ -111,9 +113,12 @@ describe('playlist migration service', () => {
 		}
 		const { done } = await openPreview(host);
 
+		const notice = vi.spyOn(obsidian, 'Notice');
 		preview.finish?.(true);
 		await done;
 
+		expect(notice.mock.calls).toHaveLength(1);
+		expect(notice.mock.calls[0]?.[0]).toBeTruthy();
 		expect(notices.at(-1)).toBe(count === 1
 			? 'Switched 1 playlist base to the cards view.'
 			: 'Switched 2 playlist bases to the cards view.');
@@ -292,18 +297,14 @@ filters:
 	});
 
 	it('shows the playlist basename during conversion', async () => {
-		const messages: string[] = [];
-		vi.spyOn(Notice.prototype, 'setMessage').mockImplementation(function (this: Notice, message) {
-			messages.push(typeof message === 'string' ? message : message.textContent ?? '');
-			return this;
-		});
+		const notice = vi.spyOn(obsidian, 'Notice');
 		const host = await fixture();
 		const { done } = await openPreview(host);
 
 		preview.finish?.(true);
 		await done;
 
-		expect(messages).toEqual(['Converting Mix...']);
+		expect(notice).toHaveBeenCalledWith('Converting Mix...', 0);
 	});
 
 	it.each([1, 2])('pluralizes converted playlists and linked tracks for count %i', async (count) => {
