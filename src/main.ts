@@ -71,7 +71,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     createPlaylist: (name) => this.playlists.createPlaylist(name),
     addTracks: (playlistPath, paths) => this.playlists.addTracks(playlistPath, paths, false),
     playIfIdle: (path) => {
-      if (this.viewPlaybackState !== 'playing') void this.playTrack(path);
+      if (this.viewPlaybackState !== 'playing' && this.viewPlaybackState !== 'loading') void this.playTrack(path);
     },
     onPendingChange: () => this.notifyChange(),
     onTrackRename: (from, to) => this.playback.followRename(from, to),
@@ -304,7 +304,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     await this.openPlaylist(path);
   }
   togglePlayback(): Promise<void> {
-    if (this.viewPlaybackState === 'playing') {
+    if (this.viewPlaybackState === 'playing' || this.viewPlaybackState === 'loading') {
       this.playerSurface?.pause();
       return Promise.resolve();
     }
@@ -383,7 +383,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     await this.playlists.removeTrack(playlistPath, trackPath);
     if (this.playback.currentTrackPath === trackPath) {
       // A paused track's replacement must not start just because an earlier play left the intent set.
-      this.playIntent = this.viewPlaybackState === 'playing';
+      this.playIntent = this.viewPlaybackState === 'playing' || this.viewPlaybackState === 'loading';
       this.playback.currentTrackPath = successorAfterRemoval(queueBefore, trackPath);
       this.notifyChange();
     }

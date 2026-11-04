@@ -22,7 +22,7 @@ export function formatTime(seconds: number): string {
 export class PlayerSurface {
 	private currentVideoId: string | null = null;
 	private currentAutoplay = false;
-	private host: HTMLElement;
+	private host: Pick<HTMLElement, 'win'>;
 	private audioElement: HTMLAudioElement | null = null;
 	private audioCacheService: AudioCachePort | null = null;
 	private suppressCallbacks = false;
@@ -58,7 +58,7 @@ export class PlayerSurface {
 	onNeedleWait: ((waiting: boolean) => void) | null = null;
 
 	constructor(
-		host: HTMLElement,
+		host: Pick<HTMLElement, 'win'>,
 		private readonly onEnded: () => Promise<void>,
 		private readonly onPlaybackChange: (playbackState: PlaybackState) => void,
 	) {
@@ -76,7 +76,7 @@ export class PlayerSurface {
 	}
 
 	private emit(state: PlaybackState): void {
-		if (state !== 'playing') {
+		if (state === 'paused' || state === 'idle') {
 			this.armMovedAt = null;
 			this.landed = false;
 		}
@@ -86,7 +86,7 @@ export class PlayerSurface {
 	/** Intent to play: the arm starts swinging now, whatever the audio source is doing. */
 	private armDown(): void {
 		this.armMovedAt ??= performance.now();
-		this.emit('playing');
+		this.emit('loading');
 	}
 
 	setAudioCacheService(service: AudioCachePort): void {
@@ -122,7 +122,8 @@ export class PlayerSurface {
 
 		if (await this.audioCacheService.hasCached(videoId)) {
 			if (token !== this.downloadToken) return;
-			this.setPhase('idle');
+			this.currentVideoId = videoId;
+			this.setPhase(autoplayEnabled ? 'connecting' : 'idle');
 			this.mountAudio(this.audioCacheService.getFileUrl(videoId), autoplayEnabled);
 			this.activateTrack(videoId, autoplayEnabled);
 			return;
@@ -170,7 +171,6 @@ export class PlayerSurface {
 	private startStream(videoId: string, url: string, autoplay: boolean): void {
 		this.mountAudio(url, autoplay, () => this.streamFailed(videoId, autoplay));
 		this.activateTrack(videoId, autoplay);
-		this.setPhase('streaming');
 		this.saveInBackground(videoId);
 	}
 
@@ -218,8 +218,7 @@ export class PlayerSurface {
 
 	private async downloadThenPlay(videoId: string, autoplayEnabled: boolean, token: number): Promise<void> {
 		if (!this.audioCacheService) return;
-		this.onNeedleWait?.(false);
-		this.emit('paused');
+		this.emit(autoplayEnabled ? 'loading' : 'paused');
 		// yt-dlp prints no progress while it reaches YouTube; "Downloading 0%" there reads as stuck.
 		this.setPhase('connecting');
 
@@ -235,13 +234,15 @@ export class PlayerSurface {
 			if (token !== this.downloadToken) return;
 			this.onDownloadProgress?.(100);
 			this.onCached?.(videoId);
-			this.setPhase('idle');
+			this.setPhase(autoplayEnabled ? 'connecting' : 'idle');
 			this.mountAudio(this.audioCacheService.getFileUrl(videoId), autoplayEnabled);
 			this.activateTrack(videoId, autoplayEnabled);
 		} catch (e) {
 			if (token !== this.downloadToken) return;
 			if (!this.downloadCancelled) {
 				console.debug('[note-player] playback unavailable', e);
+				this.onNeedleWait?.(false);
+				this.emit('paused');
 				this.onDownloadProgress?.(-1);
 				this.setPhase('failed');
 			} else {
@@ -258,6 +259,8 @@ export class PlayerSurface {
 	/** Quiet retry for the last track that could not load. */
 	retry(): void {
 		if (this.audioCacheService && !this.audioCacheService.isAvailable()) this.onNeedSetup?.();
+		this.silentPauseAudio();
+		this.audioElement = null;
 		if (this.lastTrack) void this.render(this.lastTrack, true);
 	}
 
@@ -281,11 +284,22 @@ export class PlayerSurface {
 
 	pause(): boolean {
 		const audio = this.audioElement;
+		if (!audio && this.isDownloading && this.currentVideoId) {
+			this.downloadToken++;
+			this.audioCacheService?.cancel(this.currentVideoId);
+			this.isDownloading = false;
+			this.currentVideoId = null;
+			this.onNeedleWait?.(false);
+			this.setPhase('idle');
+			this.emit('paused');
+			return true;
+		}
 		if (!audio) return false;
 		if (this.cancelPendingStart()) {
 			audio.pause();
 			audio.volume = this.volume;
 			this.emit('paused');
+			this.setPhase('idle');
 			return true;
 		}
 		if (audio.paused) return true;
@@ -321,6 +335,7 @@ export class PlayerSurface {
 			return;
 		}
 		this.armDown();
+		this.setPhase('connecting');
 		this.pendingAudio = audio;
 		if (this.landed) return this.releasePending();
 		// Without a turntable view to report the touchdown, fall back to the nominal swing time.
@@ -364,9 +379,21 @@ export class PlayerSurface {
 		};
 		audio.addEventListener('timeupdate', onTime);
 		this.cancelReadyWait = () => audio.removeEventListener('timeupdate', onTime);
-		audio.play().catch(() => {
-			audio.volume = this.volume; // interrupted by pause — benign
+		audio.play().catch((error: unknown) => {
+			// A pause or track switch cancels this attempt before its promise rejects.
+			if (!this.cancelReadyWait) return;
+			this.playbackFailed(audio, error);
 		});
+	}
+
+	private playbackFailed(audio: HTMLAudioElement, error: unknown): void {
+		if (audio !== this.audioElement) return;
+		console.debug('[note-player] audio playback failed', error);
+		this.cancelPendingStart();
+		audio.pause();
+		audio.volume = this.volume;
+		this.setPhase('failed');
+		this.emit('paused');
 	}
 
 	private cancelPendingStart(): boolean {
@@ -438,7 +465,7 @@ export class PlayerSurface {
 	private activateTrack(videoId: string, autoplayEnabled: boolean): void {
 		this.currentVideoId = videoId;
 		this.currentAutoplay = autoplayEnabled;
-		this.emit(autoplayEnabled ? 'playing' : 'paused');
+		if (!autoplayEnabled) this.emit('paused');
 	}
 
 	seekTo(ratio: number): void {
@@ -487,21 +514,32 @@ export class PlayerSurface {
 			if (this.suppressCallbacks || audio !== this.audioElement) return;
 			if (this.repeatMode === 'one') {
 				audio.currentTime = 0;
-				void audio.play();
+				this.beginPlayback(audio);
 				return;
 			}
 			this.emit('paused');
 			void this.onEnded();
 		});
-		audio.addEventListener('play', () => {
+		audio.addEventListener('playing', () => {
 			if (this.suppressCallbacks || audio !== this.audioElement) return;
 			this.emit('playing');
+			this.setPhase(onError ? 'streaming' : 'idle');
+		});
+		audio.addEventListener('waiting', () => {
+			if (this.suppressCallbacks || audio !== this.audioElement) return;
+			this.setPhase('connecting');
+			this.emit('loading');
 		});
 		audio.addEventListener('pause', () => {
 			if (this.suppressCallbacks || audio !== this.audioElement) return;
 			this.emit('paused');
+			this.setPhase('idle');
 		});
-		if (onError) audio.addEventListener('error', onError);
+		audio.addEventListener('error', () => {
+			if (this.suppressCallbacks || audio !== this.audioElement) return;
+			if (onError) onError();
+			else this.playbackFailed(audio, audio.error);
+		});
 		this.audioElement = audio;
 
 		if (autoplay) this.startAudio(audio);
