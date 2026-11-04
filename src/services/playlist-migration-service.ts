@@ -221,7 +221,6 @@ async function applyMigration(
 					return upgrade.after;
 				});
 				upgraded++;
-				converted.add(upgrade.notePath);
 				reportProgress(upgraded, preview.cardsUpgrades?.length ?? 0, upgrade.basePath, 'converted');
 			} catch (error: unknown) {
 				if (signal.aborted) throw error;
@@ -237,11 +236,11 @@ async function applyMigration(
 		progress.hide();
 	}
 	const summary = [
-		renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: converted.size, tracks: linked, missing }),
+		...(converted.size ? [renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: converted.size, tracks: linked, missing })] : []),
 		...(upgraded ? [renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: upgraded })] : []),
-	].join('\n');
+	];
 	const skipped = [...preview.conflicts, ...preview.invalid];
-	new Notice([summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n'));
+	new Notice([...summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n'));
 }
 
 async function clearLegacySetting(run: MigrationRun): Promise<MigrationFailure[]> {

@@ -173,7 +173,7 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						desc: 'Preview playlist conversion and cards-view upgrades. Original track lists are preserved.',
 						render: (setting) => {
 							setting.addButton((button) =>
-								button.setButtonText('Convert playlists and bases').onClick(() => {
+								button.setButtonText('Convert playlists and switch bases to cards').onClick(() => {
 									void convertPlaylistNotes(this.host);
 								}),
 							);

@@ -65,14 +65,16 @@ beforeEach(() => { rendered.buttons.length = 0; rendered.summaries.length = 0; }
 
 describe('migration preview counts', () => {
 	it.each([
-		{ bases: 1, legacy: true },
-		{ bases: 2, legacy: true },
-		{ bases: 1, legacy: false },
-	])('counts unique playlists with $bases base upgrades and legacy=$legacy', async ({ bases, legacy }) => {
+		{ bases: 1, legacy: true, upgrade: false, button: 'Convert 1 playlist', counts: ['1 playlist will convert', '0 tracks will be linked'] },
+		{ bases: 1, legacy: true, upgrade: true, button: 'Convert 1 playlist and switch 1 base to cards', counts: ['1 playlist will convert', '1 playlist base will switch to the cards view'] },
+		{ bases: 2, legacy: true, upgrade: true, button: 'Convert 1 playlist and switch 2 bases to cards', counts: ['1 playlist will convert', '2 playlist bases will switch to the cards view'] },
+		{ bases: 1, legacy: false, upgrade: true, button: 'Switch 1 playlist base to cards', counts: ['1 playlist base will switch to the cards view', '0 skipped'] },
+		{ bases: 2, legacy: false, upgrade: true, button: 'Switch 2 playlist bases to cards', counts: ['2 playlist bases will switch to the cards view', '0 skipped'] },
+	])('reports conversions separately with $bases bases, legacy=$legacy and upgrade=$upgrade', async ({ bases, legacy, upgrade, button, counts }) => {
 		const app = new App();
 		for (let index = 0; index < bases; index++) {
 			const fm = { type: 'music-playlist', ...(legacy && index === 0 ? { tracks: [] } : {}) };
-			await app.vault.create(`Bases/${index}.base`, 'views:\n  - type: note-player\n    name: Player\n');
+			await app.vault.create(`Bases/${index}.base`, `views:\n  - type: ${upgrade ? 'note-player' : 'cards'}\n    name: Player\n`);
 			await app.vault.create(`Playlists/${index}.md`, `---\n${JSON.stringify(fm)}\n---\n![[Bases/${index}.base]]\n`);
 		}
 		const { plan } = await collectMigrationPlan(app, { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists' });
@@ -82,10 +84,8 @@ describe('migration preview counts', () => {
 
 		expect(rendered.buttons).toEqual([
 			{ text: 'Cancel', disabled: false },
-			{ text: bases === 1 ? 'Convert 1 playlist' : 'Convert 2 playlists', disabled: false },
+			{ text: button, disabled: false },
 		]);
-		expect(rendered.summaries.slice(0, 2).map((element) => element.textContent)).toEqual(bases === 1
-			? ['1 playlist will convert', '1 playlist base will switch to the cards view']
-			: ['2 playlists will convert', '2 playlist bases will switch to the cards view']);
+		expect(rendered.summaries.slice(0, 2).map((element) => element.textContent)).toEqual(counts);
 	});
 });

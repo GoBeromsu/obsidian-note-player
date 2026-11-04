@@ -95,8 +95,28 @@ describe('playlist migration service', () => {
 		await done;
 
 		expect(notices.at(-1)).toBe(count === 1
-			? 'Converted 1 playlist, linked 1 track, 1 missing.\n1 playlist base switched to the cards view.'
-			: 'Converted 2 playlists, linked 1 track, 1 missing.\n2 playlist bases switched to the cards view.');
+			? 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 1 playlist base to the cards view.'
+			: 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 2 playlist bases to the cards view.');
+	});
+
+	it.each([1, 2])('reports only base upgrades when switching %i bases without legacy tracks', async (count) => {
+		const host = await fixture();
+		const mix = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!mix) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(mix, () => '---\n{"type":"music-playlist"}\n---\n![[Bases/0.base]]\n');
+		for (let index = 0; index < count; index++) {
+			await host.app.vault.create(`Bases/${index}.base`, 'views:\n  - type: note-player\n    name: Player\n');
+			if (index > 0) await host.app.vault.create(`Playlists/${index}.md`,
+				`---\n{"type":"music-playlist"}\n---\n![[Bases/${index}.base]]\n`);
+		}
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notices.at(-1)).toBe(count === 1
+			? 'Switched 1 playlist base to the cards view.'
+			: 'Switched 2 playlist bases to the cards view.');
 	});
 
 	it.each(['>-', '|-'])('preserves parsed base data with %s block scalars, comments, quoted keys, and other views', async (style) => {
@@ -138,7 +158,7 @@ filters:
 		await done;
 
 		expect(parse(await readNote(host.app, 'Bases/Mix.base'))).toEqual(intended);
-		expect(notices.at(-1)).toContain('1 playlist base switched to the cards view.');
+		expect(notices.at(-1)).toContain('Switched 1 playlist base to the cards view.');
 	});
 
 	it('reports unparseable paired bases as needs review without any write or success notice', async () => {
@@ -260,7 +280,7 @@ filters:
 		expect(await readNote(host.app, 'Bases/Unpaired.base')).toBe(source);
 		expect(await readNote(host.app, 'Playlists/Mix.base')).toBe(source);
 		expect(notices.at(-1)).toContain(count === 1
-			? '1 playlist base switched to the cards view.' : '2 playlist bases switched to the cards view.');
+			? 'Switched 1 playlist base to the cards view.' : 'Switched 2 playlist bases to the cards view.');
 		const before = [...state(host.app).contents];
 		const write = vi.spyOn(host.app.vault, 'process');
 
@@ -335,7 +355,7 @@ filters:
 		preview.finish?.(true);
 		await vi.runAllTimersAsync();
 		await done;
-		expect(notices.at(-1)).toContain(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 0, tracks: 0, missing: 0 }));
+		expect(notices.at(-1)).toBe('Playlists/Mix.md: Metadata did not settle for Playlists/Mix.md. Run the converter again.');
 		expect(fake.handlers.size).toBe(0);
 		fake.pauseIndexing = false;
 		fake.flush();

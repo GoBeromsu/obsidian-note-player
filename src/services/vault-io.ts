@@ -175,12 +175,29 @@ export function collectNoteSnapshots(app: App, folders: string[], mapping: Youtu
 	});
 }
 
+const warnedBasePaths = new WeakMap<App, Set<string>>();
+
 export async function collectBaseConfigs(app: App, notes: MarkdownNoteSnapshot[], playlistNoteType: string): Promise<Map<string, unknown>> {
 	const paths = new Set(notes.filter((note) => hasType(note.frontmatter, playlistNoteType)).flatMap((note) => note.embeddedBases));
 	const configs = new Map<string, unknown>();
 	for (const path of paths) {
 		const file = app.vault.getFileByPath(path);
-		if (file) configs.set(path, parseYaml(await app.vault.cachedRead(file)));
+		if (!file) continue;
+		try {
+			const content = await app.vault.cachedRead(file);
+			configs.set(path, parseYaml(content));
+		} catch (error: unknown) {
+			if (!(error instanceof Error)) throw error;
+			let warned = warnedBasePaths.get(app);
+			if (!warned) {
+				warned = new Set();
+				warnedBasePaths.set(app, warned);
+			}
+			if (!warned.has(path)) {
+				warned.add(path);
+				console.warn(`[Note Player] Could not read or parse playlist base ${path}; using name-ascending queue order.`, error);
+			}
+		}
 	}
 	return configs;
 }
