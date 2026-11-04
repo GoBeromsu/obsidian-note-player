@@ -1,7 +1,7 @@
 {
 	"id": "note-player",
 	"name": "Note Player",
-	"version": "0.8.9",
+	"version": "0.9.0",
 	"minAppVersion": "1.13.0",
 	"description": "Play note-backed playlists with YouTube, cached audio, and local files.",
 	"author": "Beomsu Koh",
