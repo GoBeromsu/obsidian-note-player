@@ -76,6 +76,55 @@ afterEach(() => {
 });
 
 describe('playlist migration service', () => {
+	it('converts only the legacy playlist in a mixed vault and reruns byte-identically', async () => {
+		const host = await fixture('tracks');
+		const base = 'views:\n  - type: cards\n    name: Cards\n';
+		await host.app.vault.create('Bases/Converted.base', base);
+		await host.app.vault.create('Playlists/Converted.md',
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Converted.base]]\n');
+		await host.app.vault.create('Bases/New.base', base);
+		await host.app.vault.create('Playlists/New.md',
+			'---\n{"type":"music-playlist"}\n---\n![[Bases/New.base]]\n');
+		await seed(host.app, 'Tracks/Native.md', { type: 'music', playlists: ['[[Playlists/New]]'] });
+		const native = await readNote(host.app, 'Playlists/New.md');
+		const converted = await readNote(host.app, 'Playlists/Converted.md');
+		const { done } = await openPreview(host);
+		expect(preview.plan?.totals.playlists).toBe(1);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(await readNote(host.app, 'Playlists/New.md')).toBe(native);
+		expect(await readNote(host.app, 'Playlists/Converted.md')).toBe(converted);
+		expect(notices.at(-1)).toBe('Converted 1 playlist, linked 1 track, 1 missing.');
+		const before = [...state(host.app).contents];
+		const process = vi.spyOn(host.app.vault, 'process');
+		notices.length = 0;
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(process).not.toHaveBeenCalled();
+		expect(notices).toEqual(['All playlists already use Bases.']);
+	});
+
+	it('reports a plugin-created companion as already using Bases without writes', async () => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.create('Bases/New.base', 'views:\n  - type: cards\n    name: Cards\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist"}\n---\n![[Bases/New.base]]\n');
+		const before = [...state(host.app).contents];
+		const process = vi.spyOn(host.app.vault, 'process');
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(process).not.toHaveBeenCalled();
+		expect(notices).toEqual(['All playlists already use Bases.']);
+	});
+
 	it.each([1, 2])('upgrades only paired custom views and is byte-identical on rerun: %i bases', async (count) => {
 		const host = await fixture();
 		const note = host.app.vault.getFileByPath('Playlists/Mix.md');

@@ -41,7 +41,8 @@ export function alreadyConverted(content: string, source: MigrationContentSource
 	return !embeds.needsReview && embeds.embeddedBases.length === 1
 		&& path !== undefined && source.app.vault.getFileByPath(path)?.extension === 'base'
 		&& hasType(fm, settings.playlistNoteType)
-		&& Array.isArray(fm.tracks_legacy) && (key === 'tracks_legacy' || !Object.hasOwn(fm, key));
+		&& (!Object.hasOwn(fm, 'tracks_legacy') || Array.isArray(fm.tracks_legacy))
+		&& (key === 'tracks_legacy' || !Object.hasOwn(fm, key));
 }
 
 export interface MigrationNoteEdit {
