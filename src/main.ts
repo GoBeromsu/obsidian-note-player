@@ -35,7 +35,6 @@ const EMPTY_LIBRARY: MusicLibrarySnapshot = {
 
 export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost {
   settings: NotePlayerSettings = DEFAULT_SETTINGS;
-
   private library: MusicLibrarySnapshot = EMPTY_LIBRARY;
   private refreshGeneration = 0;
   private changeListeners = new Set<() => void>();
@@ -51,7 +50,6 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   private viewPlaybackState: PlaybackState = 'idle';
   /** Set by an explicit play so the track starts even with autoplay off. */
   private playIntent = false;
-  private playingPlaylistPath: string | null = null;
   private downloadStatusBar: DownloadStatusBar | null = null;
   private volume: VolumeController | null = null;
   private readonly playlists = new PlaylistService({
@@ -61,6 +59,8 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     getLibrary: () => this.library,
     refresh: () => this.refreshIndex(),
     selectPlaylist: (path) => this.selectPlaylist(path),
+    saveSettings: () => this.saveData(this.settings),
+    invalidateRefresh: () => { this.refreshGeneration++; },
   });
   private readonly importer = new TrackImporter({
     app: this.app,
@@ -320,7 +320,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   playTrack(path: string): Promise<void> {
     this.playIntent = true;
     const selected = this.selectedPlaylist();
-    if (selected?.trackPaths.includes(path)) this.playingPlaylistPath = selected.path;
+    if (selected?.trackPaths.includes(path)) this.playlists.playingPlaylistPath = selected.path;
     // The surface keeps the loaded track, so re-rendering it would not resume a paused one.
     if (path === this.playback.currentTrackPath && this.playerSurface?.play()) return Promise.resolve();
     this.playback.play(path, this.library.tracks);
@@ -331,7 +331,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   playPrevious(): Promise<void> {
     if (this.playback.previous(this.currentQueue())) {
-      this.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
+      this.playlists.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
       this.playIntent = true;
       this.notifyChange();
       void this.prefetchNext();
@@ -342,7 +342,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   /** `explicit` is false when a track ends on its own, so autoplay alone decides whether the next one starts. */
   playNext(explicit = true): Promise<void> {
     if (this.playback.next(this.currentQueue())) {
-      this.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
+      this.playlists.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
       this.playIntent = explicit;
       this.notifyChange();
       void this.prefetchNext();
@@ -454,7 +454,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const schedule = () => this.scheduleRefresh();
     this.registerEvent(metadataCache.on('changed', schedule));
     this.registerEvent(metadataCache.on('resolved', schedule));
-    this.registerEvent(vault.on('rename', schedule));
+    this.registerEvent(vault.on('rename', (file, oldPath) => this.playlists.followRename(file.path, oldPath, schedule)));
     this.registerEvent(vault.on('delete', schedule));
     this.registerEvent(vault.on('create', schedule));
     this.registerEvent(vault.on('modify', (file) => {
@@ -526,7 +526,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   // Next/previous follow the playlist the track was started from, not the one being browsed.
   private currentQueue(): PlaylistTrack[] {
-    const playing = this.library.playlists.find((playlist) => playlist.path === this.playingPlaylistPath);
+    const playing = this.library.playlists.find((playlist) => playlist.path === this.playlists.playingPlaylistPath);
     return (playing ?? this.selectedPlaylist())?.tracks.map(toPlaylistTrack) ?? [];
   }
 
