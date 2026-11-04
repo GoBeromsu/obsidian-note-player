@@ -34,6 +34,7 @@ export interface PlaylistMigration {
 }
 
 export interface PlaylistMigrationPlan {
+  readonly cardsUpgrades?: readonly PlaylistCardsUpgrade[];
   readonly playlists: PlaylistMigration[];
   readonly invalid: string[];
   readonly conflicts: string[];
@@ -46,6 +47,13 @@ export interface PlaylistMigrationPlan {
     readonly missing: number;
     readonly invalid: number;
   };
+}
+
+export interface PlaylistCardsUpgrade {
+  readonly notePath: string;
+  readonly basePath: string;
+  readonly before: string;
+  readonly after: string;
 }
 
 export function planPlaylistMigration(input: PlaylistMigrationInput): PlaylistMigrationPlan {

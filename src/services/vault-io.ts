@@ -6,7 +6,7 @@ import { uniqueName } from '../utils/dedupe';
 import { hasType } from '../utils/frontmatter';
 import type { MarkdownNoteSnapshot } from '../types/notes';
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
-import { resolveEmbeddedFile } from './embed-resolution';
+import { resolveEmbeddedFile, resolvePlaylistBase } from './embed-resolution';
 
 export async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	let current = '';
@@ -167,10 +167,8 @@ export function collectNoteSnapshots(app: App, folders: string[], mapping: Youtu
 			const key = link.key.split('.')[0];
 			if (target && key) (frontmatterLinks[key] ??= []).push(target.path);
 		}
-		const embeddedBases = (cache?.embeds ?? [])
-			.map((embed) => resolveEmbeddedFile(app, embed.link, file.path))
-			.filter((target): target is TFile => target !== null && target.extension === 'base')
-			.map((target) => target.path);
+		const base = resolvePlaylistBase(app, file);
+		const embeddedBases = base ? [base.path] : [];
 		return {
 			path: file.path,
 			basename: file.basename,

@@ -78,7 +78,7 @@ describe('buildMusicLibrary', () => {
       note('Gamma', { ctime: 30, mtime: 10, frontmatter: { type: 'music', source, date_created: '2026-02-01', rank: 2 } }),
     ].map((track) => ({ ...track, frontmatterLinks: { playlists: ['Mix.md'] } }));
     const result = library([...tracks, playlist('Mix')], new Map([
-      ['Bases/Mix.base', { views: [{ type: 'note-player', sort }] }],
+      ['Bases/Mix.base', { views: [{ type: 'cards', sort }] }],
     ]));
     expect(result.playlists[0]?.trackPaths).toEqual(expected);
   });

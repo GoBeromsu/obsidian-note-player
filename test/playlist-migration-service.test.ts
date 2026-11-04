@@ -57,7 +57,7 @@ async function openPreview(host: Awaited<ReturnType<typeof fixture>>) {
 	const opened = new Promise<void>((resolve) => { ready = resolve; });
 	preview.opened = ready;
 	const done = convertPlaylistNotes(host);
-	await opened;
+	await Promise.race([opened, done]);
 	return { done };
 }
 
@@ -76,6 +76,45 @@ afterEach(() => {
 });
 
 describe('playlist migration service', () => {
+	it.each([1, 2])('upgrades only paired custom views and is byte-identical on rerun: %i bases', async (count) => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Collection.base]]\n');
+		const source = '# Keep this comment\nfilters:\n  and:\n    - \'type == "music"\'\nviews:\n  - type: note-player # custom\n    name: "Player"\n    filters: \'author == "A"\'\n    sort:\n      - property: file.mtime\n        direction: DESC\n    order: [file.name, note.author]\n  - type: table\n    name: "My table"\n    order: [file.name]\n  - {type: note-player, name: Extra, sort: []}\n';
+		const expected = source.replace('type: note-player # custom\n', 'type: cards # custom\n    image: "note.poster"\n')
+			.replace('{type: note-player,', '{type: cards, image: "note.poster",');
+		await host.app.vault.create('Bases/Collection.base', source);
+		await host.app.vault.create('Bases/Unpaired.base', source);
+		// A matching filename without an embed is not a pairing.
+		await host.app.vault.create('Playlists/Mix.base', source);
+		if (count === 2) {
+			await host.app.vault.create('Bases/Second.base', source);
+			await host.app.vault.create('Playlists/Second.md',
+				'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Second.base]]\n');
+		}
+		host.settings.musicThumbnailProperty = 'poster';
+		const { done } = await openPreview(host);
+		expect(preview.plan?.cardsUpgrades?.map((base) => base.basePath)).toEqual(
+			count === 1 ? ['Bases/Collection.base'] : ['Bases/Collection.base', 'Bases/Second.base']);
+		preview.finish?.(true);
+		await done;
+		expect(await readNote(host.app, 'Bases/Collection.base')).toBe(expected);
+		expect(await readNote(host.app, 'Bases/Unpaired.base')).toBe(source);
+		expect(await readNote(host.app, 'Playlists/Mix.base')).toBe(source);
+		expect(notices.at(-1)).toContain(count === 1
+			? '1 playlist base switched to the cards view.' : '2 playlist bases switched to the cards view.');
+		const before = [...state(host.app).contents];
+		const write = vi.spyOn(host.app.vault, 'process');
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(write).not.toHaveBeenCalled();
+		expect(notices.at(-1)).toBe('All playlists already use Bases.');
+	});
+
 	it('shows the playlist basename during conversion', async () => {
 		const messages: string[] = [];
 		vi.spyOn(Notice.prototype, 'setMessage').mockImplementation(function (this: Notice, message) {
