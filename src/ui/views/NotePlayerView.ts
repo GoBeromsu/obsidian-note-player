@@ -310,7 +310,6 @@ export class NotePlayerView extends ItemView {
 		}
 
 		const playbackState = state.playbackState;
-		const playRequested = playbackState === 'playing' || playbackState === 'loading';
 
 		elements.playerPanel.removeClass('onp-hidden');
 		const playerRail = elements.playerPanel.createDiv({ cls: 'onp-now-playing-shell' });
@@ -346,8 +345,8 @@ export class NotePlayerView extends ItemView {
 			void this.runAction('', () => this.host.playPrevious(), false);
 		}, { iconOnly: true }));
 		transport.appendChild(createActionButton(
-			playRequested ? 'Pause current track' : 'Play current track',
-			playRequested ? 'pause' : 'play',
+			playbackState === 'playing' ? 'Pause current track' : 'Play current track',
+			playbackState === 'playing' ? 'pause' : 'play',
 			() => {
 				void this.toggleCurrentPlayback(current);
 			},
@@ -485,14 +484,13 @@ export class NotePlayerView extends ItemView {
 
 	private setNeedle(down: boolean): void {
 		const current = this.host.getState().currentTrack;
-		const state = this.host.getState().playbackState;
-		if (!current || (state === 'playing' || state === 'loading') === down) return;
+		if (!current || (this.host.getState().playbackState === 'playing') === down) return;
 		void this.toggleCurrentPlayback(current);
 	}
 
 	private async toggleCurrentPlayback(current: PlaylistTrack): Promise<void> {
 		const playbackState = this.host.getState().playbackState;
-		if (playbackState === 'playing' || playbackState === 'loading') {
+		if (playbackState === 'playing') {
 			this.playerSurface.pause();
 			return;
 		}

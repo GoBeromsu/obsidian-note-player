@@ -120,8 +120,6 @@ export class Turntable {
   onLanded: (() => void) | null = null;
 
   update(track: PlaylistTrack | null, state: PlaybackState, soundsOn: boolean, style: TurntableStyle = 'realistic'): void {
-    // Loading is play intent: the needle must land before audio can report playing.
-    if (state === 'loading') state = 'playing';
     this.setStyle(style);
     this.sound.setEnabled(soundsOn);
     // Flush styles so the arm transition starts from the pre-render state after re-attach.

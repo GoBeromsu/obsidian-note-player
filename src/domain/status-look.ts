@@ -1,5 +1,5 @@
 export type StatusTone = 'idle' | 'busy' | 'live' | 'playing' | 'done' | 'warn' | 'failed';
-export type StatusPlayback = 'playing' | 'loading' | 'paused' | 'idle';
+export type StatusPlayback = 'playing' | 'paused' | 'idle';
 export type StatusAction = 'cancel' | 'retry' | 'open';
 
 export interface StatusLook {
@@ -17,7 +17,6 @@ export function clipTitle(title: string): string {
 /** What the bar shows when nothing is downloading or failing: the track, in the state it is in. */
 export function restingLook(title: string | null, playback: StatusPlayback, streaming: boolean): StatusLook {
 	const name = title ? clipTitle(title) : null;
-	if (playback === 'loading') return { icon: 'loader', text: 'Connecting…', tone: 'busy' };
 	if (streaming && playback !== 'paused') return { icon: 'radio', text: name ?? 'Streaming', tone: 'live' };
 	if (!name) return { icon: 'music', text: 'Note Player', tone: 'idle' };
 	if (playback === 'paused') return { icon: 'pause', text: name, tone: 'idle' };
@@ -27,7 +26,7 @@ export function restingLook(title: string | null, playback: StatusPlayback, stre
 /** Screen-reader text for the resting bar: the state, then the full (unclipped) title. */
 export function restingLabel(title: string | null, playback: StatusPlayback, shown: string, loading = false): string {
 	if (!title || playback === 'idle') return shown;
-	return `${playback === 'loading' ? 'Loading' : playback === 'paused' ? 'Paused' : 'Playing'}: ${loading ? 'loading title…' : title}`;
+	return `${playback === 'paused' ? 'Paused' : 'Playing'}: ${loading ? 'loading title…' : title}`;
 }
 
 const ACTION_HINT: Record<StatusAction, string> = {

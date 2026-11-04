@@ -49,7 +49,7 @@ function renderEqBars(actions: HTMLElement, state: PlaylistViewState): void {
 
 function syncEqBars(eqBars: HTMLElement, state: PlaylistViewState): void {
 	const playing = state.playbackState === 'playing';
-	const label = state.playbackState === 'loading' ? 'Loading' : playing ? 'Playing' : 'Paused';
+	const label = playing ? 'Playing' : 'Paused';
 	eqBars.toggleClass('is-paused', !playing);
 	eqBars.setAttribute('aria-label', label);
 	eqBars.setAttribute('title', label);
