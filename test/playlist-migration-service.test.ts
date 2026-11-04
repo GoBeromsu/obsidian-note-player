@@ -176,12 +176,20 @@ filters:
 		await host.app.vault.create('Bases/Broken.base', source);
 		const before = [...state(host.app).contents];
 		const write = vi.spyOn(host.app.vault, 'process');
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
+		await convertPlaylistNotes(host);
 		await convertPlaylistNotes(host);
 
 		expect([...state(host.app).contents]).toEqual(before);
 		expect(write).not.toHaveBeenCalled();
-		expect(notices).toEqual([expect.stringMatching(/Bases\/Broken\.base: Needs review/)]);
+		expect(notices).toHaveLength(2);
+		for (const message of notices) {
+			expect(message).toContain('Broken.base');
+			expect(message).not.toMatch(/[\r\n^]|Bases\//);
+		}
+		expect(warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Bases/Broken.base'), expect.any(Error));
+		expect(warning.mock.calls[0]?.[1]).toHaveProperty('message', expect.stringContaining('\n'));
 	});
 
 	it.each(['views: [', 'views: []'])('writes nothing when serialized YAML is invalid or changes data: %s', async (serialized) => {
@@ -199,7 +207,7 @@ filters:
 
 		expect([...state(host.app).contents]).toEqual(before);
 		expect(write).not.toHaveBeenCalled();
-		expect(notices).toEqual([expect.stringMatching(/Bases\/Mix\.base: Needs review/)]);
+		expect(notices).toEqual([expect.stringMatching(/Mix\.base[^\n]*$/)]);
 	});
 
 	it('converts only the legacy playlist in a mixed vault and reruns byte-identically', async () => {

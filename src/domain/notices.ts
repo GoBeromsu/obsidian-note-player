@@ -8,6 +8,7 @@ export const NOTICE_CATALOG = {
 	migration_complete: { template: 'Converted {{playlists:playlist}}, linked {{tracks:track}}, {{missing}} missing.' },
 	migration_cards_complete: { template: 'Switched {{bases:playlist base}} to the cards view.' },
 	migration_failed: { template: 'Could not convert {{name}}: {{reason}}' },
+	base_unreadable: { template: "Couldn't read {{name}} - check its YAML." },
 	playlist_created: { template: 'Created playlist {{name}}.' },
 	playlist_loaded: { template: 'Loaded playlist {{name}}.' },
 	track_added: { template: 'Added {{title}} to {{playlist}}.' },

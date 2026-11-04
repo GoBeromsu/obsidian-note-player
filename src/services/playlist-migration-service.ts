@@ -55,7 +55,10 @@ async function previewMigration(run: MigrationRun): Promise<void> {
 	const scan = await collectMigrationPlan(host.app, host.settings);
 	signal.throwIfAborted();
 	const { plan, failures } = scan;
-	for (const { path: name, reason } of failures) showNotice('migration_failed', { name, reason });
+	for (const { path: name, reason } of failures) {
+		if (name.endsWith('.base')) showNotice('base_unreadable', { name: name.split('/').pop() ?? name });
+		else showNotice('migration_failed', { name, reason });
+	}
 	if (!plan.totals.playlists && !plan.cardsUpgrades?.length && !plan.conflicts.length && !plan.invalid.length) {
 		if (failures.length) return;
 		const noOpSettings = { ...host.settings };
