@@ -454,7 +454,15 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const schedule = () => this.scheduleRefresh();
     this.registerEvent(metadataCache.on('changed', schedule));
     this.registerEvent(metadataCache.on('resolved', schedule));
-    this.registerEvent(vault.on('rename', schedule));
+    this.registerEvent(vault.on('rename', (file, oldPath) => {
+      this.refreshGeneration++;
+      if (this.settings.lastPlaylistPath === oldPath) {
+        this.settings.lastPlaylistPath = file.path;
+        void this.saveData(this.settings);
+      }
+      if (this.playingPlaylistPath === oldPath) this.playingPlaylistPath = file.path;
+      schedule();
+    }));
     this.registerEvent(vault.on('delete', schedule));
     this.registerEvent(vault.on('create', schedule));
     this.registerEvent(vault.on('modify', (file) => {

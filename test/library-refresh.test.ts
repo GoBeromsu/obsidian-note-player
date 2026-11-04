@@ -5,12 +5,37 @@ import { DEFAULT_SETTINGS } from '../src/domain/config';
 import { collectBaseConfigs, collectNoteSnapshots } from '../src/services/vault-io';
 import type { MarkdownNoteSnapshot } from '../src/types/notes';
 
+const vaultEvents = vi.hoisted(() => ({
+  rename: (_file: { path: string }, _oldPath: string) => {},
+}));
+
 vi.mock('obsidian', () => ({
-  App: class {},
+  App: class {
+    vault = {
+      adapter: {},
+      on: (event: string, callback: typeof vaultEvents.rename) => {
+        if (event === 'rename') vaultEvents.rename = callback;
+        return {};
+      },
+    };
+    metadataCache = { on: () => ({}) };
+    workspace = { layoutReady: true };
+  },
   Notice: class {},
   Plugin: class {
     constructor(readonly app: App) {}
     saveData() { return Promise.resolve(); }
+    loadData() {
+      return Promise.resolve({
+        musicFolder: 'Music', playlistFolder: 'Playlists',
+        lastPlaylistPath: 'Mix.md', autoOpenOnStartup: false,
+      });
+    }
+    registerEvent() {}
+    registerView() {}
+    registerBasesView() { return true; }
+    addRibbonIcon() {}
+    addSettingTab() {}
   },
   debounce: (callback: () => void) => callback,
 }));
@@ -21,7 +46,15 @@ vi.mock('../src/services/vault-io', () => ({
 vi.mock('../src/ui/settings', () => ({ NotePlayerSettingsTab: class {} }));
 vi.mock('../src/ui/commands', () => ({ registerCommands: vi.fn() }));
 vi.mock('../src/services/playlist-migration-service', () => ({ convertPlaylistNotes: vi.fn(() => Promise.resolve()) }));
-vi.mock('../src/ui/player-setup', () => ({ createPlayer: vi.fn() }));
+vi.mock('../src/ui/player-setup', () => ({
+  createPlayer: () => ({
+    surface: { setRepeatMode: () => {}, setAudioCacheService: () => {} },
+    statusBar: { setNowPlaying: () => {} },
+  }),
+}));
+vi.mock('../src/services/thumbnail-cache', () => ({
+  ThumbnailCacheService: { attach: () => null },
+}));
 vi.mock('../src/ui/views/NotePlayerView', () => ({
   NotePlayerView: class {},
   VIEW_TYPE_NOTE_PLAYER: 'obsidian-note-player-view',
@@ -58,6 +91,36 @@ function snapshots(members: string[]): MarkdownNoteSnapshot[] {
 }
 
 describe('library refresh ordering', () => {
+  it('keeps the selected playlist, queue and current track after its note is renamed', async () => {
+    const plugin = new NotePlayerPlugin(new App(), {
+      id: 'note-player', name: 'Note Player', version: '0.8.9',
+      minAppVersion: '1.13.0', description: '', author: '',
+    });
+    const [mix, song] = snapshots(['Mix.md']);
+    if (!mix || !song) throw new Error('Missing playlist fixture');
+    const other = { ...mix, path: 'Another.md', basename: 'Another', embeddedBases: ['Another.base'] };
+    vi.mocked(collectNoteSnapshots).mockReturnValue([other, mix, song]);
+    vi.mocked(collectBaseConfigs).mockResolvedValue(new Map());
+    await plugin.onload();
+    await plugin.playTrack('Song.md');
+    const before = plugin.getState();
+    const save = vi.spyOn(plugin, 'saveData');
+    vi.mocked(collectNoteSnapshots).mockReturnValue([
+      other,
+      { ...mix, path: 'Renamed.md', basename: 'Renamed' },
+      { ...song, frontmatterLinks: { playlists: ['Renamed.md'] } },
+    ]);
+
+    vaultEvents.rename({ path: 'Renamed.md' }, 'Mix.md');
+    await plugin.refresh();
+
+    expect(plugin.getState().selectedPlaylistPath).toBe('Renamed.md');
+    expect(plugin.settings.lastPlaylistPath).toBe('Renamed.md');
+    expect(plugin.getState().queue).toEqual(before.queue);
+    expect(plugin.getState().currentTrack).toEqual(before.currentTrack);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ lastPlaylistPath: 'Renamed.md' }));
+  });
+
   it.each([
     ['Other.md', 'Other song.md'],
     ['Mix.md', 'Song.md'],
