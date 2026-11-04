@@ -3,9 +3,7 @@ import {
 	resolveSelectedPlaylistPath,
 	getPlaylistOrThrow,
 	toPlaylistSummary,
-	moveValue,
 	toPlaylistTrack,
-	moveItem,
 	successorAfterRemoval,
 } from '../src/domain/playlist-manager';
 import type { MusicTrack, PlaylistNote } from '../src/types/music';
@@ -13,12 +11,12 @@ import type { MusicTrack, PlaylistNote } from '../src/types/music';
 function makePlaylist(path: string, trackPaths: string[] = []): PlaylistNote {
 	return {
 		path,
+		basePath: path.replace(/\.md$/, '.base'),
 		title: path.replace(/\.md$/, ''),
 		coverUrl: '',
 		description: '',
 		trackPaths,
 		tracks: [],
-		missingTrackPaths: [],
 	};
 }
 
@@ -31,7 +29,6 @@ function makeTrack(path: string): MusicTrack {
 		watchUrl: 'https://youtube.com/watch?v=abc',
 		videoId: 'abc',
 		thumbnailUrl: 'https://img.youtube.com/vi/abc/mqdefault.jpg',
-		imageUrl: 'https://img.youtube.com/vi/abc/mqdefault.jpg',
 		tags: ['rock'],
 	};
 }
@@ -100,26 +97,6 @@ describe('toPlaylistTrack', () => {
 		expect(result.artist).toBe('Artist');
 		expect(result.videoId).toBe('abc');
 		expect(result.tags).toEqual(['rock']);
-	});
-});
-
-describe('moveItem', () => {
-	it('moves an item without mutating the input', () => {
-		const input = ['a', 'b', 'c'];
-		expect(moveItem(input, 0, 2)).toEqual(['b', 'c', 'a']);
-		expect(moveItem(input, 2, 0)).toEqual(['c', 'a', 'b']);
-		expect(input).toEqual(['a', 'b', 'c']);
-	});
-});
-
-describe('moveValue', () => {
-	it('keeps entries added after the move started', () => {
-		expect(moveValue(['a', 'b', 'c', 'new'], 'a', 2)).toEqual(['b', 'c', 'a', 'new']);
-	});
-
-	it('clamps the target and ignores missing items', () => {
-		expect(moveValue(['a', 'b'], 'a', 5)).toEqual(['b', 'a']);
-		expect(moveValue(['a', 'b'], 'x', 0)).toEqual(['a', 'b']);
 	});
 });
 

@@ -1,0 +1,544 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { App, Component } from 'obsidian';
+import * as obsidian from 'obsidian';
+import { parse } from 'yaml';
+import { DEFAULT_SETTINGS } from '../src/domain/config';
+import { convertPlaylistNotes } from '../src/services/playlist-migration-service';
+import { notices, state } from './helpers/migration-obsidian';
+import { NOTICE_CATALOG, renderNotice } from '../src/domain/notices';
+import type { PlaylistMigrationPlan } from '../src/domain/playlist-migration';
+
+const preview = vi.hoisted(() => ({
+	plan: undefined as PlaylistMigrationPlan | undefined,
+	finish: undefined as ((confirmed: boolean) => void) | undefined,
+	opened: () => {},
+}));
+const owners: Component[] = [];
+
+vi.mock('../src/ui/views/MigrationPreviewModal', () => ({
+	MigrationPreviewModal: class {
+		constructor(_app: unknown, plan: PlaylistMigrationPlan, finish: (confirmed: boolean) => void) {
+			preview.plan = plan;
+			preview.finish = finish;
+		}
+		open() { preview.opened(); }
+		showProgress() {}
+		close() {}
+	},
+}));
+
+vi.mock('obsidian', () => import('./helpers/migration-obsidian'));
+
+function seed(app: App, path: string, fm: Record<string, unknown>) {
+	return app.vault.create(path, `---\n${JSON.stringify(fm)}\n---\nOriginal body\n`);
+}
+
+function readNote(app: App, path: string): Promise<string> {
+	const file = app.vault.getFileByPath(path);
+	if (!file) throw new Error(`Missing fixture: ${path}`);
+	return app.vault.read(file);
+}
+
+async function fixture(legacyKey = 'songs') {
+	const app = new App();
+	await seed(app, 'Playlists/Mix.md', { type: 'music-playlist', [legacyKey]: ['[[Tracks/A]]', '[[Missing]]'] });
+	await seed(app, 'Tracks/A.md', { type: 'music', playlists: ['[[Other]]'] });
+	state(app).resolve();
+	const owner = new Component();
+	owner.load();
+	owners.push(owner);
+	return Object.assign(owner, {
+		app,
+		settings: { ...DEFAULT_SETTINGS, playlistFolder: 'Playlists', legacyPlaylistTrackProperty: legacyKey },
+		saveSettings: vi.fn(() => Promise.resolve()),
+	});
+}
+
+async function openPreview(host: Awaited<ReturnType<typeof fixture>>) {
+	let ready: () => void = () => {};
+	const opened = new Promise<void>((resolve) => { ready = resolve; });
+	preview.opened = ready;
+	const done = convertPlaylistNotes(host);
+	await Promise.race([opened, done]);
+	return { done };
+}
+
+beforeEach(() => {
+	notices.length = 0;
+	vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+	preview.plan = undefined;
+	preview.finish = undefined;
+});
+
+afterEach(() => {
+	for (const owner of owners.splice(0)) owner.unload();
+	vi.useRealTimers();
+	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
+});
+
+describe('playlist migration service', () => {
+	it.each([1, 2])('counts each converted playlist once with %i cards-view upgrades', async (count) => {
+		const host = await fixture('tracks');
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, (content) => content + '![[Bases/Mix.base]]\n');
+		await host.app.vault.create('Bases/Mix.base', 'views:\n  - type: note-player\n    name: Player\n');
+		if (count === 2) {
+			await host.app.vault.create('Bases/Next.base', 'views:\n  - type: note-player\n    name: Player\n');
+			await host.app.vault.create('Playlists/Next.md',
+				'---\n{"type":"music-playlist"}\n---\n![[Bases/Next.base]]\n');
+		}
+		const { done } = await openPreview(host);
+
+		const notice = vi.spyOn(obsidian, 'Notice');
+		preview.finish?.(true);
+		await done;
+
+		expect(notice.mock.calls.every(([message]) => typeof message === 'string' && message.trim().length > 0)).toBe(true);
+		expect(notices.at(-1)).toBe(count === 1
+			? 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 1 playlist base to the cards view.'
+			: 'Converted 1 playlist, linked 1 track, 1 missing.\nSwitched 2 playlist bases to the cards view.');
+	});
+
+	it.each([1, 2])('reports only base upgrades when switching %i bases without legacy tracks', async (count) => {
+		const host = await fixture();
+		const mix = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!mix) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(mix, () => '---\n{"type":"music-playlist"}\n---\n![[Bases/0.base]]\n');
+		for (let index = 0; index < count; index++) {
+			await host.app.vault.create(`Bases/${index}.base`, 'views:\n  - type: note-player\n    name: Player\n');
+			if (index > 0) await host.app.vault.create(`Playlists/${index}.md`,
+				`---\n{"type":"music-playlist"}\n---\n![[Bases/${index}.base]]\n`);
+		}
+		const { done } = await openPreview(host);
+
+		const notice = vi.spyOn(obsidian, 'Notice');
+		preview.finish?.(true);
+		await done;
+
+		expect(notice.mock.calls).toHaveLength(1);
+		expect(notice.mock.calls[0]?.[0]).toBeTruthy();
+		expect(notices.at(-1)).toBe(count === 1
+			? 'Switched 1 playlist base to the cards view.'
+			: 'Switched 2 playlist bases to the cards view.');
+	});
+
+	it('does not create an empty final notice when conversion completes externally during preview', async () => {
+		const host = await fixture('tracks');
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () => '---\n{"type":"music-playlist","tracks":[]}\n---\n');
+		const { done } = await openPreview(host);
+		await host.app.vault.create('Playlists/Mix.base', 'views: [{type: cards, name: Cards}]\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Playlists/Mix.base]]\n');
+		const notice = vi.spyOn(obsidian, 'Notice');
+		const write = vi.spyOn(host.app.vault, 'process');
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notice.mock.calls.every(([message]) => typeof message === 'string' && message.trim().length > 0)).toBe(true);
+		expect(notice.mock.calls).toHaveLength(1);
+		expect(notices).toEqual([]);
+		expect(write).not.toHaveBeenCalled();
+	});
+
+	it.each(['>-', '|-'])('preserves parsed base data with %s block scalars, comments, quoted keys, and other views', async (style) => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Mix.base]]\n');
+		const source = `# retained data, normalized formatting allowed
+filters:
+  and:
+    - 'type == "music"'
+"custom key": |
+  first line
+  second line
+"views":
+  - "type": ${style}
+      note-player
+    image: >-
+      note.old
+    name: Player
+    filters: |
+      author == "A"
+    sort: [{property: file.name, direction: DESC}]
+    order: [file.name, note.author]
+  - type: table
+    name: My table
+    filters: 'author != "B"'
+    order: [file.name]
+`;
+		await host.app.vault.create('Bases/Mix.base', source);
+		host.settings.musicThumbnailProperty = 'poster';
+		const intended = parse(source);
+		intended.views[0].type = 'cards';
+		intended.views[0].name = 'Cards';
+		intended.views[0].image = 'note.poster';
+		intended.views[0].imageFit = '';
+		intended.views[0].imageAspectRatio = 0.5625;
+		intended.properties = { 'file.name': { displayName: 'Title' }, 'note.author': { displayName: 'Artist' } };
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(parse(await readNote(host.app, 'Bases/Mix.base'))).toEqual(intended);
+		expect(notices.at(-1)).toContain('Switched 1 playlist base to the cards view.');
+	});
+
+	it('reports unparseable paired bases as needs review without any write or success notice', async () => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Broken.base]]\n');
+		const source = 'views:\n  - type: note-player\n    sort: [\n';
+		await host.app.vault.create('Bases/Broken.base', source);
+		const before = [...state(host.app).contents];
+		const write = vi.spyOn(host.app.vault, 'process');
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+		await convertPlaylistNotes(host);
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(write).not.toHaveBeenCalled();
+		expect(notices).toHaveLength(2);
+		for (const message of notices) {
+			expect(message).toContain('Broken.base');
+			expect(message).not.toMatch(/[\r\n^]|Bases\//);
+		}
+		expect(warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Bases/Broken.base'), expect.any(Error));
+		expect(warning.mock.calls[0]?.[1]).toHaveProperty('message', expect.stringContaining('\n'));
+	});
+
+	it('reports each shared unreadable base once per run while upgrading unrelated bases', async () => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.create('Bases/Good.base', 'views: [{type: note-player, name: Player}]\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist"}\n---\n![[Bases/Good.base]]\n');
+		for (const name of ['Broken', 'Other']) await host.app.vault.create(`Bases/${name}.base`, 'views: [');
+		for (const [name, base] of [['A', 'Broken'], ['B', 'Broken'], ['C', 'Other']]) {
+			await host.app.vault.create(`Playlists/${name}.md`,
+				`---\n{"type":"music-playlist"}\n---\n![[Bases/${base}.base]]\n`);
+		}
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notices).toEqual([
+			renderNotice(NOTICE_CATALOG.base_unreadable.template, { name: 'Broken.base' }),
+			renderNotice(NOTICE_CATALOG.base_unreadable.template, { name: 'Other.base' }),
+			renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: 1 }),
+		]);
+		expect(warning).toHaveBeenCalledTimes(2);
+		expect(parse(await readNote(host.app, 'Bases/Good.base')).views[0].type).toBe('cards');
+	});
+
+	it.each(['views: [', 'views: []'])('writes nothing when serialized YAML is invalid or changes data: %s', async (serialized) => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Mix.base]]\n');
+		await host.app.vault.create('Bases/Mix.base', 'views:\n  - type: note-player\n    name: Player\n');
+		const before = [...state(host.app).contents];
+		const write = vi.spyOn(host.app.vault, 'process');
+		vi.spyOn(obsidian, 'stringifyYaml').mockReturnValue(serialized);
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(write).not.toHaveBeenCalled();
+		expect(notices).toEqual([expect.stringMatching(/Mix\.base[^\n]*$/)]);
+	});
+
+	it('converts only the legacy playlist in a mixed vault and reruns byte-identically', async () => {
+		const host = await fixture('tracks');
+		const base = 'views:\n  - type: cards\n    name: Cards\n';
+		await host.app.vault.create('Bases/Converted.base', base);
+		await host.app.vault.create('Playlists/Converted.md',
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Converted.base]]\n');
+		await host.app.vault.create('Bases/New.base', base);
+		await host.app.vault.create('Playlists/New.md',
+			'---\n{"type":"music-playlist"}\n---\n![[Bases/New.base]]\n');
+		await seed(host.app, 'Tracks/Native.md', { type: 'music', playlists: ['[[Playlists/New]]'] });
+		const native = await readNote(host.app, 'Playlists/New.md');
+		const converted = await readNote(host.app, 'Playlists/Converted.md');
+		const { done } = await openPreview(host);
+		expect(preview.plan?.totals.playlists).toBe(1);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(await readNote(host.app, 'Playlists/New.md')).toBe(native);
+		expect(await readNote(host.app, 'Playlists/Converted.md')).toBe(converted);
+		expect(notices.at(-1)).toBe('Converted 1 playlist, linked 1 track, 1 missing.');
+		const before = [...state(host.app).contents];
+		const process = vi.spyOn(host.app.vault, 'process');
+		notices.length = 0;
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(process).not.toHaveBeenCalled();
+		expect(notices).toEqual(['All playlists already use Bases.']);
+	});
+
+	it('reports a plugin-created companion as already using Bases without writes', async () => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.create('Bases/New.base', 'views:\n  - type: cards\n    name: Cards\n');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist"}\n---\n![[Bases/New.base]]\n');
+		const before = [...state(host.app).contents];
+		const process = vi.spyOn(host.app.vault, 'process');
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(process).not.toHaveBeenCalled();
+		expect(notices).toEqual(['All playlists already use Bases.']);
+	});
+
+	it.each([1, 2])('upgrades only paired custom views and is byte-identical on rerun: %i bases', async (count) => {
+		const host = await fixture();
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, () =>
+			'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Collection.base]]\n');
+		const source = '# Keep this comment\nfilters:\n  and:\n    - \'type == "music"\'\nviews:\n  - type: note-player # custom\n    name: "Player"\n    filters: \'author == "A"\'\n    sort:\n      - property: file.mtime\n        direction: DESC\n    order: [file.name, note.author]\n  - type: table\n    name: "My table"\n    order: [file.name]\n  - {type: note-player, name: Extra, sort: []}\n';
+		await host.app.vault.create('Bases/Collection.base', source);
+		await host.app.vault.create('Bases/Unpaired.base', source);
+		// A matching filename without an embed is not a pairing.
+		await host.app.vault.create('Playlists/Mix.base', source);
+		if (count === 2) {
+			await host.app.vault.create('Bases/Second.base', source);
+			await host.app.vault.create('Playlists/Second.md',
+				'---\n{"type":"music-playlist","tracks_legacy":[]}\n---\n![[Bases/Second.base]]\n');
+		}
+		host.settings.musicThumbnailProperty = 'poster';
+		const { done } = await openPreview(host);
+		expect(preview.plan?.cardsUpgrades?.map((base) => base.basePath)).toEqual(
+			count === 1 ? ['Bases/Collection.base'] : ['Bases/Collection.base', 'Bases/Second.base']);
+		preview.finish?.(true);
+		await done;
+		expect(parse(await readNote(host.app, 'Bases/Collection.base'))).toEqual({
+			filters: { and: ['type == "music"'] },
+			properties: { 'file.name': { displayName: 'Title' }, 'note.author': { displayName: 'Artist' } },
+			views: [
+				{ type: 'cards', name: 'Cards', image: 'note.poster', filters: 'author == "A"',
+					imageFit: '', imageAspectRatio: 0.5625,
+					sort: [{ property: 'file.mtime', direction: 'DESC' }], order: ['file.name', 'note.author'] },
+				{ type: 'table', name: 'My table', order: ['file.name'] },
+				{ type: 'cards', name: 'Extra', sort: [], image: 'note.poster', imageFit: '', imageAspectRatio: 0.5625 },
+			],
+		});
+		expect(await readNote(host.app, 'Bases/Unpaired.base')).toBe(source);
+		expect(await readNote(host.app, 'Playlists/Mix.base')).toBe(source);
+		expect(notices.at(-1)).toContain(count === 1
+			? 'Switched 1 playlist base to the cards view.' : 'Switched 2 playlist bases to the cards view.');
+		const before = [...state(host.app).contents];
+		const write = vi.spyOn(host.app.vault, 'process');
+
+		await convertPlaylistNotes(host);
+
+		expect([...state(host.app).contents]).toEqual(before);
+		expect(write).not.toHaveBeenCalled();
+		expect(notices.at(-1)).toBe('All playlists already use Bases.');
+	});
+
+	it('shows the playlist basename during conversion', async () => {
+		const notice = vi.spyOn(obsidian, 'Notice');
+		const host = await fixture();
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notice).toHaveBeenCalledWith('Converting Mix...', 0);
+	});
+
+	it.each([1, 2])('pluralizes converted playlists and linked tracks for count %i', async (count) => {
+		const host = await fixture();
+		if (count === 2) {
+			await seed(host.app, 'Playlists/Next.md', { type: 'music-playlist', songs: ['[[Tracks/B]]'] });
+			await seed(host.app, 'Tracks/B.md', { type: 'music' });
+		}
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notices.at(-1)).toBe(count === 1
+			? 'Converted 1 playlist, linked 1 track, 1 missing.'
+			: 'Converted 2 playlists, linked 2 tracks, 1 missing.');
+	});
+
+	it('waits for byte-matched post-write indexing and cleans temporary listeners', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		fake.pauseIndexing = true;
+		let written: () => void = () => {};
+		const signal = new Promise<void>((resolve) => { written = resolve; });
+		fake.onWrite = (file) => { if (file.path === 'Playlists/Mix.md') written(); };
+		const { done } = await openPreview(host);
+		let completed = false;
+		void done.then(() => { completed = true; });
+		preview.finish?.(true);
+		await signal;
+		expect(completed).toBe(false);
+		expect(fake.handlers.size).toBe(1);
+
+		fake.pauseIndexing = false;
+		fake.flush();
+		await done;
+
+		expect(fake.handlers.size).toBe(0);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 1 }));
+	});
+
+	it('times out post-write indexing truthfully and reuses the owned block on retry', async () => {
+		const host = await fixture();
+		const fake = state(host.app);
+		fake.pauseIndexing = true;
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+		const { done } = await openPreview(host);
+		preview.finish?.(true);
+		await vi.runAllTimersAsync();
+		await done;
+		expect(notices.at(-1)).toBe('Playlists/Mix.md: Metadata did not settle for Playlists/Mix.md. Run the converter again.');
+		expect(fake.handlers.size).toBe(0);
+		fake.pauseIndexing = false;
+		fake.flush();
+
+		const retry = await openPreview(host);
+		preview.finish?.(true);
+		await retry.done;
+
+		expect([...fake.files.keys()].filter((path) => path.endsWith('.base'))).toEqual(['Playlists/Mix.base']);
+		expect(fake.contents.get('Playlists/Mix.md')?.match(/!\[\[/g)).toHaveLength(1);
+		expect(notices.at(-1)).toBe(renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: 1, tracks: 1, missing: 1 }));
+	});
+
+	it('preserves the archive and body while linking resolved tracks and keeping unknown memberships', async () => {
+		const host = await fixture();
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(await readNote(host.app, 'Playlists/Mix.md')).toBe(
+			'---\n{"type":"music-playlist","tracks_legacy":["[[Tracks/A]]","[[Missing]]"]}\n---\nOriginal body\n\n![[Playlists/Mix.base]]\n',
+		);
+		expect(await readNote(host.app, 'Tracks/A.md')).toContain(
+			'"playlists":["[[Other]]","[[Playlists/Mix]]"]',
+		);
+		expect(host.app.vault.getFileByPath('Playlists/Mix.base')).not.toBeNull();
+		expect(host.settings.legacyPlaylistTrackProperty).toBeUndefined();
+	});
+
+	it('holds one preview for overlapping invocations and performs no writes on cancel', async () => {
+		const host = await fixture();
+		const { done } = await openPreview(host);
+		const before = await readNote(host.app, 'Playlists/Mix.md');
+
+		const duplicate = convertPlaylistNotes(host);
+		preview.finish?.(false);
+		await done;
+
+		expect(duplicate).toBe(done);
+		expect(await readNote(host.app, 'Playlists/Mix.md')).toBe(before);
+		expect(host.app.vault.getAllLoadedFiles().map((file) => file.path)).toEqual(['Playlists/Mix.md', 'Tracks/A.md']);
+	});
+
+	it('joins overlapping invocations until conversion writes have finished', async () => {
+		const host = await fixture();
+		let entered: () => void = () => {};
+		let release: () => void = () => {};
+		const writeStarted = new Promise<void>((resolve) => { entered = resolve; });
+		const writeGate = new Promise<void>((resolve) => { release = resolve; });
+		const write = host.app.fileManager.processFrontMatter.bind(host.app.fileManager);
+		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementationOnce(async (file, edit) => {
+			entered();
+			await writeGate;
+			await write(file, edit);
+		});
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await writeStarted;
+		try {
+			expect(convertPlaylistNotes(host)).toBe(done);
+		} finally {
+			release();
+			await done;
+		}
+
+		expect(await readNote(host.app, 'Tracks/A.md')).toContain(
+			'"playlists":["[[Other]]","[[Playlists/Mix]]"]',
+		);
+	});
+
+	it('skips conflicts and invalid notes without forgetting their configured legacy key', async () => {
+		const host = await fixture();
+		await seed(host.app, 'Playlists/Conflict.md', { type: 'music-playlist', songs: [], tracks_legacy: ['keep'] });
+		await seed(host.app, 'Playlists/Invalid.md', { type: 'music-playlist', songs: 'not a list' });
+		const conflict = await readNote(host.app, 'Playlists/Conflict.md');
+		const { done } = await openPreview(host);
+		expect(preview.plan).toMatchObject({ conflicts: ['Playlists/Conflict.md'], invalid: ['Playlists/Invalid.md'] });
+
+		preview.finish?.(true);
+		await done;
+
+		expect(await readNote(host.app, 'Playlists/Conflict.md')).toBe(conflict);
+		expect(host.settings.legacyPlaylistTrackProperty).toBe('songs');
+	});
+
+	it('continues with later playlists after one track write fails', async () => {
+		const host = await fixture();
+		await seed(host.app, 'Playlists/Next.md', { type: 'music-playlist', songs: [] });
+		vi.spyOn(host.app.fileManager, 'processFrontMatter').mockImplementationOnce(() => Promise.reject(new Error('Write denied')));
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(await readNote(host.app, 'Tracks/A.md')).toContain('"playlists":["[[Other]]"]');
+		expect(await readNote(host.app, 'Playlists/Next.md')).toContain('"tracks_legacy":[]');
+		expect(host.settings.legacyPlaylistTrackProperty).toBeUndefined();
+	});
+
+	it('does not duplicate bases or memberships when metadata still contains the legacy state', async () => {
+		const host = await fixture('tracks');
+		const stale = { type: 'music-playlist', tracks: ['[[Tracks/A]]', '[[Missing]]'] };
+		const { done } = await openPreview(host);
+		preview.finish?.(true);
+		await done;
+		vi.spyOn(host.app.metadataCache, 'getFileCache').mockReturnValue({ frontmatter: stale });
+		const paths = host.app.vault.getAllLoadedFiles().map((file) => file.path);
+		const note = await readNote(host.app, 'Playlists/Mix.md');
+		const track = await readNote(host.app, 'Tracks/A.md');
+
+		vi.useFakeTimers();
+		vi.stubGlobal('activeWindow', { setTimeout, clearTimeout });
+		const rerun = convertPlaylistNotes(host);
+		await vi.runAllTimersAsync();
+		await rerun;
+
+		expect(host.app.vault.getAllLoadedFiles().map((file) => file.path)).toEqual(paths);
+		expect(await readNote(host.app, 'Playlists/Mix.md')).toBe(note);
+		expect(await readNote(host.app, 'Tracks/A.md')).toBe(track);
+	});
+});

@@ -1,12 +1,13 @@
 export interface YoutubePlaylistPropertyMapping {
-  musicUrlProperties: string[];
-  musicThumbnailProperties: string[];
-  musicArtistProperties: string[];
-  playlistTrackProperty: string;
+  musicUrlProperty: string;
+  musicThumbnailProperty: string;
+  musicArtistProperty: string;
+  playlistMembershipProperty: string;
   playlistDescriptionProperty: string;
   playlistCoverProperty: string;
   musicNoteType: string;
   playlistNoteType: string;
+  legacyPlaylistTrackProperty?: string;
 }
 
 import type { AudioFormat } from './audio';

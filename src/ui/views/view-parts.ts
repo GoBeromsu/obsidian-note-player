@@ -1,4 +1,5 @@
 import { setIcon } from 'obsidian';
+import type { PlaylistViewHost } from '../../types/view';
 
 export type RunAction = (
 	successMessage: string,
@@ -8,6 +9,12 @@ export type RunAction = (
 
 export function buildClass(base: string, flags: Record<string, boolean>): string {
 	return [base, ...Object.entries(flags).filter(([, enabled]) => enabled).map(([name]) => name)].join(' ');
+}
+
+/** Empty for unavailable tracks; otherwise the cached file, or the remote URL while it downloads. */
+export function thumbnailSrc(host: PlaylistViewHost, videoId: string, remoteUrl: string): string {
+	if (!remoteUrl) return '';
+	return host.getThumbnailCache?.()?.resolve(videoId) ?? remoteUrl;
 }
 
 export function renderEmptyState(container: HTMLElement, title: string, copy: string): void {

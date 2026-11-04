@@ -4,7 +4,7 @@ Play note-backed playlists with YouTube, cached audio, and local files.
 
 ![The Note Player view in a sample vault: a playlist card, a turntable with the needle on the record, and a now-playing card for a track by Isaiah 6tyOne.](https://raw.githubusercontent.com/GoBeromsu/obsidian-note-player/main/docs/assets/player.png)
 
-Each track is a Markdown note, each playlist is a note listing tracks, and a turntable-style player plays them without leaving your vault.
+Each track is a Markdown note. Each playlist is a Bases file embedded in a companion note, with playback in the sidebar player.
 
 ## Features
 
@@ -45,7 +45,11 @@ The track note is created in the **Music folder** setting (or Obsidian's default
 
 ### Playlist notes
 
-A playlist is a note with `type: playlist` and a `tracks` property listing links to track notes. A track note has `type: music` and a YouTube URL in the `youtube` or `url` property. Property names and note types are configurable in settings.
+A playlist is a companion note with `type: music-playlist` embedding a `.base` file. Its first view is Obsidian's native **Cards** view, showing track titles, authors, and the configured thumbnail property. Cards use Obsidian's theme in both light and dark mode. Open a card to open its track note; playback is only from the sidebar player.
+
+Track notes have `type: music`, a YouTube URL in `source`, and links to companion playlist notes in `playlists`. Property names and note types are configurable in settings. Queue membership follows those links; queue order follows the base's first view's sort, regardless of view type, with name ascending when no supported sort is set.
+
+Run **Convert playlist notes to Bases** from the command palette or settings to preview conversion of legacy track lists and upgrades of paired playlist bases from the former custom view to native cards. Original lists stay in `tracks_legacy`; filters, sorting, and other views are preserved. Unpaired bases are never upgraded. Conversion runs only when requested, not on startup.
 
 ### Player
 
@@ -62,7 +66,12 @@ The now-playing card shows a spinning record with a tonearm. Starting playback l
 
 ## Settings
 
-Playlist folder, music folder, property mapping for URL, thumbnail, and artist, playlist schema (track list, description, cover, note types), audio format (MP3 or WAV), autoplay, open on startup, and **Turntable sounds**.
+Playlist folder, music folder, property mapping for URL, thumbnail, artist, playlist membership, description, cover, and note types, audio format (MP3 or WAV), autoplay, open on startup, and **Turntable sounds**.
+
+- **Music folder** is a library discovery scope and where imported track notes are created.
+- **Playlist folder** is a playlist discovery scope and where new playlists are created.
+
+Both folder settings include all subfolders. Choosing **Vault root** in either setting includes the whole vault, including all subfolders.
 
 ## Disclosures
 
@@ -88,8 +97,8 @@ Note Player is desktop only. It has no telemetry and no accounts, and it sends n
 
 ### Reading your vault
 
-- To build the music library, the plugin reads the frontmatter of Markdown notes in your **Music folder** and its subfolders, in your **Playlist folder**, and in the track notes your playlists link to, through Obsidian's metadata cache. With no Music folder set, only notes at the vault root are read, never its subfolders. It does this on startup, when notes change, and when you run **Refresh music library**. Note contents aren't read, and nothing leaves your device.
-- The property fields in settings suggest frontmatter keys found in that same folder.
+- To build the music library, the plugin reads the frontmatter of Markdown notes in your **Music folder** and **Playlist folder**, including all subfolders, and in the track notes your playlists link to, through Obsidian's metadata cache. Choosing **Vault root** in either folder setting includes the whole vault, including all subfolders. Initial indexing is deferred until the workspace layout is ready; subsequent indexing runs when notes change and when you run **Refresh music library**. Discovery uses cached Markdown file metadata rather than walking folders or reading note contents. Only paired `.base` files are read for queue sorting. Nothing leaves your device.
+- The property fields in settings suggest frontmatter keys found across your vault.
 
 ### Clipboard
 

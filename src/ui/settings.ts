@@ -1,83 +1,44 @@
 import {
-	AbstractInputSuggest,
 	App,
 	debounce,
 	Plugin,
 	PluginSettingTab,
+	type ButtonComponent,
+	type ExtraButtonComponent,
 	type Setting,
 	type SettingDefinitionItem,
+	type SettingDefinitionRender,
 } from 'obsidian';
-import { DEFAULT_PROPERTY_MAPPING } from '../domain/config';
-import { collectMusicFiles } from '../services/vault-io';
-import { parsePropertyList } from '../utils/property-list';
+import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/config';
+import { buildFolderOptions } from '../domain/settings-options';
+import { convertPlaylistNotes } from '../services/playlist-migration-service';
 import type { AudioFormat } from '../types/audio';
 import type { NotePlayerSettings, TurntableStyle } from '../types/settings';
+import type { ThumbnailCachePort } from '../types/view';
+import { showNotice } from './notices';
+import { PropertySuggestModal, ValueSuggestModal } from './views/PropertySuggestModal';
 
 interface SettingsHost extends Plugin {
 	settings: NotePlayerSettings;
 	saveSettings(): Promise<void>;
 	refresh(showNotice?: boolean): Promise<void>;
 	refreshCompanionBases(): Promise<void>;
+	getThumbnailCache(): ThumbnailCachePort | null;
 }
 
-type ListKey = 'musicUrlProperties' | 'musicThumbnailProperties' | 'musicArtistProperties';
-type TextKey =
-	| 'playlistFolder'
-	| 'playlistTrackProperty'
-	| 'playlistDescriptionProperty'
-	| 'playlistCoverProperty'
-	| 'musicNoteType'
-	| 'playlistNoteType';
+type MappingKey = keyof typeof DEFAULT_PROPERTY_MAPPING;
+type FolderKey = 'playlistFolder' | 'musicFolder';
 
-const LIST_KEYS: readonly string[] = ['musicUrlProperties', 'musicThumbnailProperties', 'musicArtistProperties'];
-const NO_REFRESH_KEYS: readonly string[] = ['audioFormat', 'autoOpenOnStartup', 'musicFolder', 'turntableSounds'];
+interface Picker {
+	tooltip: string;
+	open: (current: string, onPick: (value: string) => void) => void;
+}
+
+const NO_REFRESH_KEYS: readonly string[] = ['audioFormat', 'autoOpenOnStartup', 'turntableSounds'];
 const TURNTABLE_STYLE_OPTIONS: Record<TurntableStyle, string> = { realistic: 'Realistic', minimal: 'Minimal' };
 const AUDIO_FORMAT_OPTIONS: Record<AudioFormat, string> = { mp3: 'MP3', wav: 'WAV', opus: 'OPUS', aac: 'AAC' };
-
-function collectVaultProperties(app: App, musicFolder: string): string[] {
-	const properties = new Set<string>();
-	for (const file of collectMusicFiles(app, [musicFolder])) {
-		const cache = app.metadataCache.getFileCache(file);
-		if (cache?.frontmatter) {
-			for (const key of Object.keys(cache.frontmatter)) {
-				if (key !== 'position') properties.add(key);
-			}
-		}
-	}
-	return [...properties].sort();
-}
-
-class PropertySuggest extends AbstractInputSuggest<string> {
-	constructor(
-		app: App,
-		private readonly inputEl: HTMLInputElement,
-		private readonly list: boolean,
-		private readonly getMusicFolder: () => string,
-	) {
-		super(app, inputEl);
-	}
-
-	getSuggestions(query: string): string[] {
-		const token = (this.list ? query.split(',').pop() ?? '' : query).trim().toLowerCase();
-		return collectVaultProperties(this.app, this.getMusicFolder()).filter((p) => p.toLowerCase().includes(token));
-	}
-
-	renderSuggestion(value: string, el: HTMLElement): void {
-		el.setText(value);
-	}
-
-	selectSuggestion(value: string): void {
-		if (this.list) {
-			const parts = this.inputEl.value.split(',');
-			parts[parts.length - 1] = ' ' + value;
-			this.inputEl.value = parts.join(',').replace(/^,\s*/, '');
-		} else {
-			this.inputEl.value = value;
-		}
-		this.inputEl.dispatchEvent(new Event('input'));
-		this.close();
-	}
-}
+// Must match the key hasType (utils/frontmatter) reads.
+const TYPE_PROPERTY = 'type';
 
 export class NotePlayerSettingsTab extends PluginSettingTab {
 	private refreshPending = false;
@@ -89,12 +50,11 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	}
 
 	getControlValue(key: string): unknown {
-		const value: unknown = this.host.settings[key as keyof NotePlayerSettings];
-		return LIST_KEYS.includes(key) && Array.isArray(value) ? value.join(', ') : value;
+		return this.host.settings[key as keyof NotePlayerSettings];
 	}
 
 	setControlValue(key: string, value: unknown): void {
-		const next = LIST_KEYS.includes(key) ? parsePropertyList(String(value)) : typeof value === 'string' ? value.trim() : value;
+		const next = normalizeSettingValue(key, value);
 		Object.assign(this.host.settings, { [key]: next });
 		this.refreshPending ||= !NO_REFRESH_KEYS.includes(key);
 		this.persist();
@@ -114,6 +74,14 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
+		const property: Picker = {
+			tooltip: 'Choose a property',
+			open: (current, onPick) => new PropertySuggestModal(this.app, current, onPick).open(),
+		};
+		const typeValue: Picker = {
+			tooltip: 'Choose a type value',
+			open: (current, onPick) => new ValueSuggestModal(this.app, TYPE_PROPERTY, current, onPick).open(),
+		};
 		return [
 			{
 				type: 'group',
@@ -144,50 +112,45 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						desc: 'Open the playlist view automatically when Obsidian finishes loading.',
 						control: { type: 'toggle', key: 'autoOpenOnStartup' },
 					},
+					{
+						name: 'Thumbnail cache',
+						desc: 'Track thumbnails are saved in the plugin folder so they show instantly, even offline. Cleared thumbnails download again the next time they appear.',
+						render: (setting) => {
+							setting.addButton((button) => button.setButtonText('Clear').onClick(() => { void this.clearThumbnails(button); }));
+						},
+					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Library',
 				items: [
-				{
-					name: 'Playlist folder',
-					desc: 'Vault folder where new playlist notes are created.',
-					control: { type: 'folder', key: 'playlistFolder', placeholder: '90. System/playlists' },
-				},
-				{
-					name: 'Music folder',
-					desc: 'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus playlists in the playlist folder. With no folder set, only notes at the vault root and tracks linked from playlists are listed.',
-					control: { type: 'folder', key: 'musicFolder', placeholder: 'Default location' },
-				},
+					this.folderRow('Playlist folder', 'Playlists are read from this folder and its subfolders, and new playlists are created here.', 'playlistFolder'),
+					this.folderRow(
+						'Music folder',
+						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root includes all folders in the vault.',
+						'musicFolder',
+					),
 				],
 			},
 			{
 				type: 'group',
-				heading: 'Music note mapping',
+				heading: 'Track properties',
 				items: [
-					this.propertyRow('URL properties', 'Comma-separated priority order for the YouTube URL property.', 'musicUrlProperties'),
-					this.propertyRow('Thumbnail properties', 'Comma-separated priority order for music-note artwork lookup.', 'musicThumbnailProperties'),
-					this.propertyRow('Artist properties', 'Comma-separated priority order for artist or author metadata.', 'musicArtistProperties'),
+					this.pickerRow('URL property', 'Frontmatter key used for the YouTube URL.', 'musicUrlProperty', property),
+					this.pickerRow('Thumbnail property', 'Frontmatter key that receives the video thumbnail when a track is imported.', 'musicThumbnailProperty', property),
+					this.pickerRow('Artist property', 'Frontmatter key used for artist or author metadata.', 'musicArtistProperty', property),
 				],
 			},
 			{
 				type: 'group',
-				heading: 'Playlist note schema',
+				heading: 'Playlist properties',
 				items: [
-					this.propertyRow('Track list property', 'Frontmatter key that stores the ordered track links for each playlist note.', 'playlistTrackProperty'),
-					this.propertyRow('Description property', 'Frontmatter key used for playlist description text.', 'playlistDescriptionProperty'),
-					this.propertyRow('Cover property', 'Frontmatter key used for playlist cover artwork.', 'playlistCoverProperty'),
-					{
-						name: 'Music note type',
-						desc: 'The frontmatter type value used to identify music notes.',
-						control: { type: 'text', key: 'musicNoteType', placeholder: DEFAULT_PROPERTY_MAPPING.musicNoteType },
-					},
-					{
-						name: 'Playlist note type',
-						desc: 'The frontmatter type value used to identify playlist notes.',
-						control: { type: 'text', key: 'playlistNoteType', placeholder: DEFAULT_PROPERTY_MAPPING.playlistNoteType },
-					},
+					this.pickerRow('Membership property', 'Frontmatter key on a track that links the playlists it belongs to.', 'playlistMembershipProperty', property),
+					this.pickerRow('Description property', 'Frontmatter key used for playlist description text.', 'playlistDescriptionProperty', property),
+					this.pickerRow('Cover property', 'Frontmatter key used for playlist cover artwork.', 'playlistCoverProperty', property),
+					this.pickerRow('Music note type', 'The type value that marks a note as a music track.', 'musicNoteType', typeValue),
+					this.pickerRow('Playlist note type', 'The type value that marks a note as a playlist.', 'playlistNoteType', typeValue),
 				],
 			},
 			{
@@ -196,11 +159,22 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Companion Bases files',
-						desc: 'Rewrite music.base and playlists.base beside your playlist folder to match the current mapping. The first property of each music-note mapping list becomes its bases column.',
+						desc: 'Rewrite music.base and playlists.base beside your playlist folder to match the current mapping.',
 						render: (setting) => {
 							setting.addButton((button) =>
 								button.setButtonText('Refresh').onClick(() => {
 									void this.host.refreshCompanionBases();
+								}),
+							);
+						},
+					},
+					{
+						name: 'Legacy playlist notes',
+						desc: 'Preview playlist conversion and cards-view upgrades. Original track lists are preserved.',
+						render: (setting) => {
+							setting.addButton((button) =>
+								button.setButtonText('Convert playlists and switch bases to cards').onClick(() => {
+									void convertPlaylistNotes(this.host);
 								}),
 							);
 						},
@@ -210,21 +184,77 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 		];
 	}
 
-	private propertyRow(name: string, desc: string, key: ListKey | TextKey) {
-		const list = LIST_KEYS.includes(key);
-		const placeholder = list ? DEFAULT_PROPERTY_MAPPING[key as ListKey].join(', ') : DEFAULT_PROPERTY_MAPPING[key as keyof typeof DEFAULT_PROPERTY_MAPPING];
+	private async clearThumbnails(button: ButtonComponent): Promise<void> {
+		const cache = this.host.getThumbnailCache();
+		if (!cache) return;
+		button.setDisabled(true).setButtonText('Clearing…');
+		button.buttonEl.addClass('onp-is-busy');
+		try {
+			await cache.clear();
+			showNotice('thumbnail_cache_cleared');
+		} catch (error) {
+			console.error('[Note Player] Could not clear the thumbnail cache', error);
+			showNotice('thumbnail_cache_clear_failed');
+		} finally {
+			button.buttonEl.removeClass('onp-is-busy');
+			button.setDisabled(false).setButtonText('Clear');
+		}
+	}
+
+	// Rendered imperatively so the options are read from the vault on every display (Obsidian caches declarative
+	// definitions) and inserted in order (an options object would reorder integer-like folder names).
+	private folderRow(name: string, desc: string, key: FolderKey): SettingDefinitionRender {
 		return {
 			name,
 			desc,
 			render: (setting: Setting) => {
-				setting.addText((text) => {
-					text
-						.setPlaceholder(String(placeholder))
-						.setValue(String(this.getControlValue(key)))
-						.onChange((value) => { void this.setControlValue(key, value); });
-					new PropertySuggest(this.app, text.inputEl, list, () => this.host.settings.musicFolder);
+				setting.addDropdown((dropdown) => {
+					const folders = this.app.vault.getAllFolders(false).map((folder) => folder.path);
+					for (const [value, label] of buildFolderOptions(folders, this.host.settings[key])) dropdown.addOption(value, label);
+					dropdown.setValue(this.host.settings[key]).onChange((value) => { this.setControlValue(key, value); });
 				});
 			},
 		};
 	}
+
+	private pickerRow(name: string, desc: string, key: MappingKey, picker: Picker): SettingDefinitionRender {
+		const fallback = DEFAULT_PROPERTY_MAPPING[key];
+		return {
+			name,
+			desc: `${desc} Default: ${fallback}.`,
+			render: (setting: Setting) => {
+				const current = () => String(this.getControlValue(key));
+				let reset: ExtraButtonComponent | null = null;
+				let button: ButtonComponent | null = null;
+				const sync = () => {
+					const value = current();
+					button?.setButtonText(value);
+					reset?.setDisabled(value === fallback);
+				};
+				const apply = (value: string) => {
+					this.setControlValue(key, value);
+					sync();
+					if (button) settle(this.host, button.buttonEl);
+				};
+				setting.setClass('onp-picker-setting');
+				setting.addExtraButton((extra) => {
+					reset = extra.setIcon('rotate-ccw').setTooltip('Reset to default').onClick(() => {
+						if (current() !== fallback) apply(fallback);
+					});
+				});
+				setting.addButton((control) => {
+					button = control.setTooltip(picker.tooltip).onClick(() => picker.open(current(), apply));
+					// Obsidian styles `.dropdown` by class, so the button inherits the native select look, chevrons included.
+					control.buttonEl.addClass('dropdown', 'onp-picker-button');
+					control.buttonEl.setAttr('aria-haspopup', 'dialog');
+				});
+				sync();
+			},
+		};
+	}
+}
+
+function settle(owner: SettingsHost, el: HTMLElement): void {
+	owner.registerDomEvent(el, 'animationend', () => el.removeClass('is-changed'), { once: true });
+	el.addClass('is-changed');
 }

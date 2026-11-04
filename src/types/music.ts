@@ -6,18 +6,17 @@ export interface MusicTrack {
   watchUrl: string;
   videoId: string;
   thumbnailUrl: string;
-  imageUrl: string;
   tags: string[];
 }
 
 export interface PlaylistNote {
   path: string;
+  basePath: string;
   title: string;
   coverUrl: string;
   description: string;
   trackPaths: string[];
   tracks: MusicTrack[];
-  missingTrackPaths: string[];
 }
 
 export interface MusicLibrarySnapshot {

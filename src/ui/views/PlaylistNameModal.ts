@@ -22,7 +22,6 @@ export class PlaylistNameModal extends Modal {
 			.addText((text) => {
 				this.input = text;
 				text.setPlaceholder('Late-night queue');
-				window.setTimeout(() => text.inputEl.focus(), 0);
 			});
 
 		new Setting(contentEl)
@@ -30,21 +29,37 @@ export class PlaylistNameModal extends Modal {
 				button
 					.setButtonText('Create')
 					.setCta()
-					.onClick(() => {
-						const value = this.input?.getValue().trim() ?? '';
-						if (!value) {
-							new Notice('Enter a playlist name.');
-							return;
-						}
-						this.close();
-						this.onSubmit(value);
-					}),
+					.onClick(() => this.submit()),
 			)
 			.addButton((button) =>
 				button
 					.setButtonText('Cancel')
 					.onClick(() => this.close()),
 			);
+
+		this.scope.register([], 'Enter', (event) => {
+			if (event.isComposing) return true;
+			if (
+				!this.input ||
+				(event.target !== this.input.inputEl &&
+					this.input.inputEl.ownerDocument.activeElement !== this.input.inputEl)
+			) {
+				return true;
+			}
+			this.submit();
+			return false;
+		});
+		this.input?.inputEl.focus();
+	}
+
+	private submit(): void {
+		const value = this.input?.getValue().trim() ?? '';
+		if (!value) {
+			new Notice('Enter a playlist name.');
+			return;
+		}
+		this.close();
+		this.onSubmit(value);
 	}
 
 	onClose(): void {

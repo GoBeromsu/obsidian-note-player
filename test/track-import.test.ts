@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PROPERTY_MAPPING } from '../src/domain/config';
-import { buildMusicFrontmatter, classifyBacklinks, classifyImport, isUnavailable, parseFlatPlaylistOutput, parseOembed, titleState, trackLabel } from '../src/domain/track-import';
+import { buildMusicFrontmatter, classifyImport, isUnavailable, parseFlatPlaylistOutput, parseOembed, titleState, trackLabel } from '../src/domain/track-import';
 
 describe('parseOembed', () => {
-  it('reads title, author and thumbnail', () => {
+  it('reads title and author without the oEmbed thumbnail', () => {
     expect(parseOembed({ title: 'Song', author_name: 'Band', thumbnail_url: 'https://i/x.jpg' }))
-      .toEqual({ title: 'Song', author: 'Band', thumbnailUrl: 'https://i/x.jpg' });
+      .toEqual({ title: 'Song', author: 'Band' });
   });
 
   it('defaults a missing author to empty', () => {
-    expect(parseOembed({ title: 'Song' })).toEqual({ title: 'Song', author: '', thumbnailUrl: '' });
+    expect(parseOembed({ title: 'Song' })).toEqual({ title: 'Song', author: '' });
   });
 
   it('rejects non-objects and missing titles', () => {
@@ -28,27 +28,53 @@ describe('trackLabel', () => {
 });
 
 describe('buildMusicFrontmatter', () => {
-  const meta = { videoId: 'Zs3CIgFET_Y', title: 'Song', author: 'Band', thumbnailUrl: 'https://i/x.jpg' };
+  const meta = { videoId: 'Zs3CIgFET_Y', title: 'Song', author: 'Band' };
 
-  it('uses the first configured keys and the note type', () => {
+  it('uses the configured keys and the note type', () => {
     expect(buildMusicFrontmatter(meta, DEFAULT_PROPERTY_MAPPING)).toEqual({
       type: 'music',
       source: 'https://www.youtube.com/watch?v=Zs3CIgFET_Y',
       author: 'Band',
-      image: 'https://i/x.jpg',
+      image: 'https://i.ytimg.com/vi/Zs3CIgFET_Y/hqdefault.jpg',
     });
   });
 
-  it('omits the image for an unavailable video', () => {
-    expect(buildMusicFrontmatter({ ...meta, author: '', thumbnailUrl: '' }, DEFAULT_PROPERTY_MAPPING)).not.toHaveProperty('image');
+  it('writes the thumbnail even when metadata is unavailable', () => {
+    expect(buildMusicFrontmatter({ ...meta, title: meta.videoId, author: '' }, DEFAULT_PROPERTY_MAPPING).image)
+      .toBe('https://i.ytimg.com/vi/Zs3CIgFET_Y/hqdefault.jpg');
+  });
+
+  it('omits the thumbnail key when the destination property is empty', () => {
+    expect(buildMusicFrontmatter(meta, { ...DEFAULT_PROPERTY_MAPPING, musicThumbnailProperty: '' })).toEqual({
+      type: 'music', source: 'https://www.youtube.com/watch?v=Zs3CIgFET_Y', author: 'Band',
+    });
+  });
+
+  it.each(['', '   '])('omits empty destinations %j even with populated metadata', (property) => {
+    expect(buildMusicFrontmatter(meta, {
+      ...DEFAULT_PROPERTY_MAPPING,
+      musicUrlProperty: property, musicArtistProperty: property, musicThumbnailProperty: property,
+    })).toEqual({ type: 'music' });
+  });
+
+  it.each([
+    { title: 'Song', author_name: 'Band', thumbnail_url: 'https://i.ytimg.com/vi/x/maxresdefault.jpg' },
+    { title: 'Song', author_name: 'Band' },
+  ])('writes the fixed thumbnail independently of oEmbed %j', (input) => {
+    const parsed = parseOembed(input);
+    expect(parsed).not.toBeNull();
+    if (!parsed) throw new Error('Expected valid oEmbed metadata');
+    expect(buildMusicFrontmatter({ videoId: meta.videoId, ...parsed }, {
+      ...DEFAULT_PROPERTY_MAPPING, musicThumbnailProperty: 'poster',
+    }).poster).toBe('https://i.ytimg.com/vi/Zs3CIgFET_Y/hqdefault.jpg');
   });
 
   it('honours custom mapping and omits an empty author', () => {
-    const mapping = { ...DEFAULT_PROPERTY_MAPPING, musicNoteType: 'song', musicUrlProperties: ['yt'] };
+    const mapping = { ...DEFAULT_PROPERTY_MAPPING, musicNoteType: 'song', musicUrlProperty: 'yt' };
     expect(buildMusicFrontmatter({ ...meta, author: '' }, mapping)).toEqual({
       type: 'song',
       yt: 'https://www.youtube.com/watch?v=Zs3CIgFET_Y',
-      image: 'https://i/x.jpg',
+      image: 'https://i.ytimg.com/vi/Zs3CIgFET_Y/hqdefault.jpg',
     });
   });
 });
@@ -94,25 +120,6 @@ describe('isUnavailable', () => {
     expect(isUnavailable({ title: 'wOzHXgqNpe8', artist: '', videoId: 'wOzHXgqNpe8' })).toBe(true);
     expect(isUnavailable({ title: 'wOzHXgqNpe8', artist: 'Band', videoId: 'wOzHXgqNpe8' })).toBe(false);
     expect(isUnavailable({ title: 'Song', artist: '', videoId: 'wOzHXgqNpe8' })).toBe(false);
-  });
-});
-
-describe('classifyBacklinks', () => {
-  const links = {
-    'Inbox.md': { 'Song.md': 1 },
-    'Road Trip.md': { 'Song.md': 2, 'Other.md': 1 },
-    'Journal.md': { 'Song.md': 1 },
-    'Unrelated.md': { 'Other.md': 1 },
-  };
-  const playlists = new Set(['Inbox.md', 'Road Trip.md']);
-
-  it('splits playlist backlinks from other notes', () => {
-    expect(classifyBacklinks(links, 'Song.md', playlists)).toEqual({ playlistSources: ['Inbox.md', 'Road Trip.md'], elsewhere: true });
-  });
-
-  it('is safe to rename when only playlists link to it', () => {
-    expect(classifyBacklinks(links, 'Other.md', new Set(['Road Trip.md', 'Unrelated.md']))).toEqual({ playlistSources: ['Road Trip.md', 'Unrelated.md'], elsewhere: false });
-    expect(classifyBacklinks(links, 'Nobody.md', playlists)).toEqual({ playlistSources: [], elsewhere: false });
   });
 });
 

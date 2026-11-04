@@ -52,7 +52,7 @@ export interface PlaylistViewState {
 /**
  * UI contract assumptions:
  * - state changes are pushed through subscribe()
- * - queue order is persisted by moveTrackInPlaylist()
+ * - queue order follows the paired base's sort
  * - playNext()/playPrevious() update currentTrack in the next emitted state
  * - if setAutoplayEnabled is missing, the UI falls back to toggleAutoplay()
  * - if openBase() is missing, the UI simply hides base-navigation actions
@@ -60,6 +60,7 @@ export interface PlaylistViewState {
 export interface PlaylistViewHost {
 	getState(): PlaylistViewState;
 	subscribe(onChange: () => void): () => void;
+	onStateChange(onChange: () => void): () => void;
 	refresh(notify?: boolean): Promise<void>;
 	selectPlaylist(path: string | null): Promise<void>;
 	selectActivePlaylist?(): Promise<void>;
@@ -71,7 +72,6 @@ export interface PlaylistViewHost {
 	addActiveNoteToPlaylist?(): Promise<void>;
 	addTrackFromUrl?(input: string): Promise<void>;
 	removeTrackFromPlaylist(path: string): Promise<void>;
-	moveTrackInPlaylist(fromIndex: number, toIndex: number): Promise<void>;
 	openNote(path: string): Promise<void>;
 	openPlaylist(path: string): Promise<void>;
 	openBase?(kind: 'music' | 'playlists'): Promise<void>;
@@ -81,6 +81,14 @@ export interface PlaylistViewHost {
 	toggleRepeatMode?(): Promise<void>;
 	getAudioCacheService?(): AudioCachePort | null;
 	getPeaksStore?(): PeaksStore | null;
+	getThumbnailCache?(): ThumbnailCachePort | null;
+}
+
+/** `resolve` never blocks: a cache miss returns the remote URL and queues a download, then subscribers fire. */
+export interface ThumbnailCachePort {
+	resolve(videoId: string): string;
+	subscribe(onChange: () => void): () => void;
+	clear(): Promise<void>;
 }
 
 export interface VaultAdapter {

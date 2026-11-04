@@ -3,14 +3,12 @@ import { LOADING_TITLE, titleState, trackLabel } from '../../domain/track-import
 import { buildYoutubeThumbnailUrl } from '../../utils/youtube';
 import type { PendingImport, PlaylistSummary, PlaylistTrack, PlaylistViewHost, PlaylistViewState } from '../../types/view';
 import { openTrackMenu } from './view-menus';
-import { buildClass, createIconButton, renderEmptyState, type RunAction } from './view-parts';
+import { buildClass, createIconButton, renderEmptyState, thumbnailSrc, type RunAction } from './view-parts';
 
 export interface QueueContext {
 	host: PlaylistViewHost;
 	run: RunAction;
 	selectedPlaylist: PlaylistSummary | undefined;
-	getDragFrom: () => number | null;
-	setDragFrom: (index: number | null) => void;
 }
 
 const renderedSignatures = new WeakMap<HTMLElement, string>();
@@ -21,7 +19,7 @@ function visiblePending(state: PlaylistViewState): PendingImport[] {
 }
 
 function queueSignature(state: PlaylistViewState, ctx: QueueContext): string {
-	const rows = state.queue.map((t) => [t.path, t.title, t.artist, t.thumbnailUrl, state.loadingTitles.has(t.videoId)].join('\u0001'));
+	const rows = state.queue.map((t) => [t.path, t.title, t.artist, thumbnailSrc(ctx.host, t.videoId, t.thumbnailUrl), state.loadingTitles.has(t.videoId)].join('\u0001'));
 	const pending = visiblePending(state).map((p) => [p.id, p.title ?? ''].join('\u0001'));
 	return [ctx.selectedPlaylist?.path ?? '', ctx.selectedPlaylist?.title ?? '', state.errorMessage ?? '', ...rows, ...pending].join('\u0002');
 }
@@ -59,7 +57,7 @@ function syncEqBars(eqBars: HTMLElement, state: PlaylistViewState): void {
 
 export function renderQueue(panel: HTMLElement, state: PlaylistViewState, ctx: QueueContext): void {
 	const signature = queueSignature(state, ctx);
-	if (ctx.getDragFrom() === null && renderedSignatures.get(panel) === signature && syncCurrentRow(panel, state)) return;
+	if (renderedSignatures.get(panel) === signature && syncCurrentRow(panel, state)) return;
 	renderedSignatures.set(panel, signature);
 	panel.empty();
 
@@ -81,7 +79,7 @@ export function renderQueue(panel: HTMLElement, state: PlaylistViewState, ctx: Q
 
 	const list = panel.createDiv({ cls: 'onp-list onp-queue-list' });
 	state.queue.forEach((track, index) => renderRow(list, state, ctx, track, index));
-	pending.forEach((entry, offset) => renderPendingRow(list, entry, state.queue.length + offset));
+	pending.forEach((entry, offset) => renderPendingRow(list, ctx.host, entry, state.queue.length + offset));
 }
 
 /** The music note stays under the image, so it shows while the thumbnail loads, or for good when it is missing or broken. */
@@ -99,11 +97,11 @@ function createRowThumb(row: HTMLElement, url: string | null): HTMLElement {
 	return thumb;
 }
 
-function renderPendingRow(list: HTMLElement, entry: PendingImport, index: number): void {
+function renderPendingRow(list: HTMLElement, host: PlaylistViewHost, entry: PendingImport, index: number): void {
 	const row = list.createDiv({ cls: 'onp-track-row is-importing' });
 	row.setAttribute('aria-busy', 'true');
-	row.createDiv({ cls: 'onp-row-grip' }).createSpan({ cls: 'onp-row-order', text: String(index + 1).padStart(2, '0') });
-	createRowThumb(row, entry.videoId ? buildYoutubeThumbnailUrl(entry.videoId) : null);
+	row.createDiv({ cls: 'onp-row-number' }).createSpan({ cls: 'onp-row-order', text: String(index + 1).padStart(2, '0') });
+	createRowThumb(row, entry.videoId ? thumbnailSrc(host, entry.videoId, buildYoutubeThumbnailUrl(entry.videoId)) : null);
 	const body = row.createDiv({ cls: 'onp-row-copy' });
 	body.createDiv({ cls: 'onp-row-title', text: entry.title ?? (entry.videoId ? 'Importing…' : 'Importing playlist…') });
 	body.createDiv({ cls: 'onp-row-subtitle', text: entry.title ? 'Adding to playlist…' : 'Fetching details…' });
@@ -127,57 +125,16 @@ function renderRow(
 	const row = list.createDiv({
 		cls: buildClass('onp-track-row', {
 			'is-current': isCurrent,
-			'is-drag-source': ctx.getDragFrom() === index,
 		}),
 	});
 
-	const grip = row.createDiv({ cls: 'onp-row-grip' });
-	grip.setAttribute('draggable', 'true');
-	grip.setAttribute('aria-label', 'Drag to reorder');
-	grip.setAttribute('title', 'Drag to reorder');
-	setIcon(grip.createDiv({ cls: 'onp-row-grip-icon' }), 'grip-vertical');
-	grip.createSpan({ cls: 'onp-row-order', text: String(index + 1).padStart(2, '0') });
-
-	grip.addEventListener('dragstart', (event) => {
-		ctx.setDragFrom(index);
-		row.addClass('is-drag-source');
-		if (event.dataTransfer) {
-			event.dataTransfer.effectAllowed = 'move';
-			event.dataTransfer.setData('text/plain', String(index));
-			event.dataTransfer.setDragImage(row, 28, 28);
-		}
-	});
-	grip.addEventListener('dragend', () => {
-		ctx.setDragFrom(null);
-		row.removeClass('is-drag-source');
-		row.removeClass('is-drop-target');
-	});
-	row.addEventListener('dragenter', (event) => {
-		event.preventDefault();
-		row.addClass('is-drop-target');
-	});
-	row.addEventListener('dragover', (event) => {
-		event.preventDefault();
-		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-		row.addClass('is-drop-target');
-	});
-	row.addEventListener('dragleave', () => {
-		row.removeClass('is-drop-target');
-	});
-	row.addEventListener('drop', (event) => {
-		event.preventDefault();
-		row.removeClass('is-drop-target');
-		const rawIndex = event.dataTransfer?.getData('text/plain');
-		const fromIndex = rawIndex ? Number(rawIndex) : ctx.getDragFrom();
-		if (fromIndex === null || Number.isNaN(fromIndex) || fromIndex === index) return;
-		void run('Queue order saved.', () => host.moveTrackInPlaylist(fromIndex, index));
-	});
+	row.createDiv({ cls: 'onp-row-number' }).createSpan({ cls: 'onp-row-order', text: String(index + 1).padStart(2, '0') });
 
 	const play = () => {
 		void run('', () => host.playTrack(track.path), false);
 	};
 
-	const thumb = createRowThumb(row, track.thumbnailUrl);
+	const thumb = createRowThumb(row, thumbnailSrc(host, track.videoId, track.thumbnailUrl));
 	setIcon(thumb.createDiv({ cls: 'onp-row-thumb-play' }), 'play');
 	thumb.addEventListener('click', play);
 

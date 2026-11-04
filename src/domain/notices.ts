@@ -1,6 +1,14 @@
+import { plural } from '../utils/plural';
+
 export const NOTICE_CATALOG = {
 	library_refreshed: { template: 'Refreshed {{tracks}} across {{playlists}}.' },
 	bases_refreshed: { template: 'Refreshed {{files}} in {{folder}}.' },
+	migration_already_bases: { template: 'All playlists already use Bases.' },
+	migration_progress: { template: 'Converting {{name}}...' },
+	migration_complete: { template: 'Converted {{playlists:playlist}}, linked {{tracks:track}}, {{missing}} missing.' },
+	migration_cards_complete: { template: 'Switched {{bases:playlist base}} to the cards view.' },
+	migration_failed: { template: 'Could not convert {{name}}: {{reason}}' },
+	base_unreadable: { template: "Couldn't read {{name}} - check its YAML." },
 	playlist_created: { template: 'Created playlist {{name}}.' },
 	playlist_loaded: { template: 'Loaded playlist {{name}}.' },
 	track_added: { template: 'Added {{title}} to {{playlist}}.' },
@@ -15,6 +23,8 @@ export const NOTICE_CATALOG = {
 	tracks_imported: { template: 'Added {{tracks}} to {{playlist}}.' },
 	action_succeeded: { template: '{{message}}' },
 	ytdlp_unavailable: { template: 'yt-dlp is not installed. Run brew install yt-dlp, then try again.' },
+	thumbnail_cache_cleared: { template: 'Thumbnail cache cleared.' },
+	thumbnail_cache_clear_failed: { template: "Couldn't clear the thumbnail cache. Try again." },
 } as const;
 
 export type NoticeId = keyof typeof NOTICE_CATALOG;
@@ -30,6 +40,7 @@ const SUCCESS_NOTICES: ReadonlySet<NoticeId> = new Set([
 	'track_removed',
 	'tracks_imported',
 	'action_succeeded',
+	'thumbnail_cache_cleared',
 ]);
 
 export function noticeDuration(id: NoticeId): number | undefined {
@@ -37,6 +48,9 @@ export function noticeDuration(id: NoticeId): number | undefined {
 }
 
 export function renderNotice(template: string, params: Record<string, string | number> = {}): string {
-	const text = template.replace(/{{\s*([\w.-]+)\s*}}/g, (_match, key: string) => String(params[key] ?? ''));
+	const text = template.replace(/{{\s*([\w.-]+)(?::([\w ]+))?\s*}}/g, (_match, key: string, noun: string | undefined) => {
+		const value = params[key] ?? '';
+		return noun && typeof value === 'number' ? plural(value, noun.trim()) : String(value);
+	});
 	return text;
 }

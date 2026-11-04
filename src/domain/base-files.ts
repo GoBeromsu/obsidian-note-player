@@ -1,5 +1,4 @@
 import type { YoutubePlaylistPropertyMapping } from '../types/settings';
-import { DEFAULT_PROPERTY_MAPPING } from './config';
 
 export const MUSIC_BASE_NAME = 'Music.base';
 export const PLAYLISTS_BASE_NAME = 'Playlists.base';
@@ -11,7 +10,7 @@ export interface CompanionBaseFile {
 
 export function buildCompanionBaseFiles(
   playlistFolder: string,
-  propertyMapping: YoutubePlaylistPropertyMapping = DEFAULT_PROPERTY_MAPPING,
+  propertyMapping: YoutubePlaylistPropertyMapping,
 ): CompanionBaseFile[] {
   const folder = getCompanionBaseFolder(playlistFolder);
 
@@ -22,7 +21,7 @@ export function buildCompanionBaseFiles(
     },
     {
       path: joinVaultPath(folder, PLAYLISTS_BASE_NAME),
-      content: createPlaylistBaseContent(propertyMapping),
+      content: createPlaylistsOverviewContent(propertyMapping),
     },
   ];
 }
@@ -40,90 +39,94 @@ export function getCompanionBaseFolder(playlistFolder: string): string {
   return segments.slice(0, -1).join('/');
 }
 
-function createMusicBaseContent(propertyMapping: YoutubePlaylistPropertyMapping): string {
-	const artistProperty = firstProperty(propertyMapping.musicArtistProperties, DEFAULT_PROPERTY_MAPPING.musicArtistProperties[0]!);
-	const thumbnailProperty = firstProperty(
-		propertyMapping.musicThumbnailProperties,
-		DEFAULT_PROPERTY_MAPPING.musicThumbnailProperties[0]!,
-  );
-  const urlProperty = firstProperty(propertyMapping.musicUrlProperties, DEFAULT_PROPERTY_MAPPING.musicUrlProperties[0]!);
+export function createMusicBaseContent(propertyMapping: YoutubePlaylistPropertyMapping): string {
+	const artistProperty = propertyMapping.musicArtistProperty;
+	const thumbnailProperty = propertyMapping.musicThumbnailProperty;
+  const urlProperty = propertyMapping.musicUrlProperty;
 
 	return [
 		'filters:',
 		'  and:',
-		'    - \'type == "music"\'',
+		`    - ${JSON.stringify(`type == ${JSON.stringify(propertyMapping.musicNoteType)}`)}`,
 		'views:',
 		'  - type: cards',
 		'    name: "Library"',
 		'    order:',
 		'      - file.name',
-		`      - ${serializeValue(artistProperty)}`,
-		`      - ${serializeValue(thumbnailProperty)}`,
-		`      - ${serializeValue(urlProperty)}`,
+		...[artistProperty, thumbnailProperty, urlProperty].filter(Boolean).map((property) => `      - ${serializeValue(property)}`),
 		'  - type: table',
 		'    name: "Table"',
 		'    order:',
 		'      - file.name',
-		`      - ${serializeValue(artistProperty)}`,
-		`      - ${serializeValue(urlProperty)}`,
+		...[artistProperty, urlProperty].filter(Boolean).map((property) => `      - ${serializeValue(property)}`),
 		'      - file.folder',
 		'      - file.mtime',
 		'properties:',
-		`  ${serializeKey(thumbnailProperty)}:`,
-		'    displayName: "Thumbnail"',
-    `  ${serializeKey(artistProperty)}:`,
-    '    displayName: "Artist"',
-    `  ${serializeKey(urlProperty)}:`,
-    '    displayName: "YouTube URL"',
+		...(thumbnailProperty ? [`  ${serializeKey(thumbnailProperty)}:`, '    displayName: "Thumbnail"'] : []),
+		...(artistProperty ? [`  ${serializeKey(artistProperty)}:`, '    displayName: "Artist"'] : []),
+		...(urlProperty ? [`  ${serializeKey(urlProperty)}:`, '    displayName: "YouTube URL"'] : []),
     '',
   ].join('\n');
 }
 
-function createPlaylistBaseContent(propertyMapping: YoutubePlaylistPropertyMapping): string {
-	const trackProperty = propertyMapping.playlistTrackProperty || DEFAULT_PROPERTY_MAPPING.playlistTrackProperty;
-	const descriptionProperty =
-		propertyMapping.playlistDescriptionProperty || DEFAULT_PROPERTY_MAPPING.playlistDescriptionProperty;
-	const coverProperty = propertyMapping.playlistCoverProperty || DEFAULT_PROPERTY_MAPPING.playlistCoverProperty;
-	const trackCountFormula = buildTrackCountFormula(trackProperty);
+export function createPlaylistsOverviewContent(propertyMapping: YoutubePlaylistPropertyMapping): string {
+	const descriptionProperty = propertyMapping.playlistDescriptionProperty;
+	const coverProperty = propertyMapping.playlistCoverProperty;
 
 	return [
 		'filters:',
 		'  and:',
-		'    - \'type == "music-playlist"\'',
-		'formulas:',
-		`  track_count: ${JSON.stringify(trackCountFormula)}`,
+		`    - ${JSON.stringify(`type == ${JSON.stringify(propertyMapping.playlistNoteType)}`)}`,
 		'views:',
 		'  - type: table',
 		'    name: "Playlists"',
 		'    order:',
 		'      - file.name',
-		'      - formula.track_count',
-		`      - ${serializeValue(descriptionProperty)}`,
-		`      - ${serializeValue(trackProperty)}`,
-		`      - ${serializeValue(coverProperty)}`,
-		'      - file.mtime',
+		...[descriptionProperty, coverProperty].filter(Boolean).map((property) => `      - ${serializeValue(property)}`),
 		'  - type: cards',
 		'    name: "Cards"',
 		'    order:',
 		'      - file.name',
-		`      - ${serializeValue(coverProperty)}`,
-		`      - ${serializeValue(descriptionProperty)}`,
-		'      - formula.track_count',
+		...[coverProperty, descriptionProperty].filter(Boolean).map((property) => `      - ${serializeValue(property)}`),
 		'properties:',
-		`  ${serializeKey(trackProperty)}:`,
-		'    displayName: "Tracks"',
-		`  ${serializeKey(descriptionProperty)}:`,
-		'    displayName: "Description"',
-		`  ${serializeKey(coverProperty)}:`,
-		'    displayName: "Cover"',
-		'  formula.track_count:',
-		'    displayName: "Count"',
+		...(descriptionProperty ? [`  ${serializeKey(descriptionProperty)}:`, '    displayName: "Description"'] : []),
+		...(coverProperty ? [`  ${serializeKey(coverProperty)}:`, '    displayName: "Cover"'] : []),
 		'',
 	].join('\n');
 }
 
-function firstProperty(values: string[], fallback: string): string {
-  return values.find((value) => value.trim().length > 0) ?? fallback;
+export function createPlaylistBaseContent(mapping: YoutubePlaylistPropertyMapping): string {
+	const membership = /^[A-Za-z_][A-Za-z0-9_]*$/.test(mapping.playlistMembershipProperty)
+		? mapping.playlistMembershipProperty
+		: `note[${JSON.stringify(mapping.playlistMembershipProperty)}]`;
+	return [
+		'filters:',
+		'  and:',
+		`    - ${JSON.stringify(`type == ${JSON.stringify(mapping.musicNoteType)}`)}`,
+		`    - ${JSON.stringify(`list(${membership}).contains(this)`)}`,
+		'views:',
+		'  - type: cards',
+		'    name: "Cards"',
+		`    image: ${serializeValue(`note.${mapping.musicThumbnailProperty}`)}`,
+		'    imageFit: ""',
+		'    imageAspectRatio: 0.5625',
+		'    sort:',
+		'      - property: file.name',
+		'        direction: ASC',
+		'    order:',
+		'      - file.name',
+		...(mapping.musicArtistProperty ? [`      - ${serializeValue(`note.${mapping.musicArtistProperty}`)}`] : []),
+		'  - type: table',
+		'    name: "Table"',
+		'    order:',
+		'      - file.name',
+		...[mapping.musicArtistProperty, mapping.musicUrlProperty].filter(Boolean).map((property) => `      - ${serializeValue(property)}`),
+		'properties:',
+		'  file.name:',
+		'    displayName: "Title"',
+		...(mapping.musicArtistProperty ? [`  ${serializeKey(`note.${mapping.musicArtistProperty}`)}:`, '    displayName: "Artist"'] : []),
+		'',
+	].join('\n');
 }
 
 function joinVaultPath(folder: string, fileName: string): string {
@@ -139,13 +142,5 @@ function serializeValue(value: string): string {
 }
 
 function needsQuotes(value: string): boolean {
-	return !/^[A-Za-z0-9_.-]+$/.test(value);
-}
-
-function buildTrackCountFormula(trackProperty: string): string {
-	if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trackProperty)) {
-		return `${trackProperty}.length`;
-	}
-
-	return `file.properties[${JSON.stringify(trackProperty)}].length`;
+	return !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(value) || /^(true|false|null|yes|no|on|off)$/i.test(value);
 }

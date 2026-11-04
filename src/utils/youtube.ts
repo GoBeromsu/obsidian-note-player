@@ -66,8 +66,8 @@ export function buildYoutubeWatchUrl(videoId: string): string {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
-export function buildYoutubeThumbnailUrl(videoId: string, quality = 'mqdefault'): string {
-  return `https://img.youtube.com/vi/${videoId}/${quality}.jpg`;
+export function buildYoutubeThumbnailUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 }
 
 function isYoutubeHost(hostname: string): boolean {

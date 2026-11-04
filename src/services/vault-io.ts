@@ -1,8 +1,12 @@
-import { normalizePath, TFile, TFolder, type App } from 'obsidian';
+import { Component, normalizePath, parseYaml, TFile, type App, type CachedMetadata } from 'obsidian';
 import type { CompanionBaseFile } from '../domain/base-files';
+import { VAULT_ROOT } from '../domain/config';
 import { collectScopedFiles } from '../domain/music-scope';
 import { uniqueName } from '../utils/dedupe';
+import { hasType } from '../utils/frontmatter';
 import type { MarkdownNoteSnapshot } from '../types/notes';
+import type { YoutubePlaylistPropertyMapping } from '../types/settings';
+import { resolveEmbeddedFile, resolvePlaylistBase } from './embed-resolution';
 
 export async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	let current = '';
@@ -18,7 +22,7 @@ export function getAvailablePath(app: App, folder: string, baseName: string): st
 	return normalizePath(`${folder}/${uniqueName(baseName, (name) => !!app.vault.getAbstractFileByPath(normalizePath(`${folder}/${name}.md`)))}.md`);
 }
 
-/** Resolves once the metadata cache has parsed a freshly written note, or after `timeoutMs`. */
+/** Waits for the initial cache entry of a newly created note. Edits use withMetadataSettled. */
 export function waitForMetadata(app: App, file: TFile, timeoutMs = 2000): Promise<void> {
 	if (app.metadataCache.getFileCache(file)?.frontmatter) return Promise.resolve();
 	return nextMetadataChange(app, file, timeoutMs);
@@ -33,25 +37,67 @@ function nextMetadataChange(app: App, file: TFile, timeoutMs = 2000): Promise<vo
 			metadataCache.offref(ref);
 			resolve();
 		};
-		const ref = metadataCache.on('changed', (changed) => { if (changed.path === file.path) done(); });
+		const ref = metadataCache.on('changed', (changed) => {
+			if (changed.path === file.path) done();
+		});
 		const timer = win.setTimeout(done, timeoutMs);
 	});
 }
 
+export interface VaultWriteHost {
+	readonly app: App;
+	readonly owner: Component;
+}
+
 /** Edits only the given frontmatter keys; resolves once the metadata cache has re-parsed the note. */
-export async function updateFrontmatter(app: App, path: string, edit: (frontmatter: Record<string, unknown>) => void): Promise<void> {
+export async function updateFrontmatter(host: VaultWriteHost, path: string, edit: (frontmatter: Record<string, unknown>) => void): Promise<void> {
+	const { app } = host;
 	const file = app.vault.getAbstractFileByPath(path);
 	if (!(file instanceof TFile)) {
 		throw new Error(`File not found: ${path}`);
 	}
-	const parsed = nextMetadataChange(app, file);
-	let changed = false;
-	await app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-		const before = JSON.stringify(frontmatter);
-		edit(frontmatter);
-		changed = JSON.stringify(frontmatter) !== before;
-	});
-	if (changed) await parsed;
+	await withMetadataSettled(host, file, () => app.fileManager.processFrontMatter(file, edit));
+}
+
+/** Subscribe before editing; only a cache event for the final written bytes establishes settlement. */
+export async function withMetadataSettled(host: VaultWriteHost, file: TFile, write: () => Promise<void>): Promise<CachedMetadata | undefined> {
+	const { app, owner } = host;
+	const scope = owner.addChild(new Component());
+	const cancellation = new Error(`Metadata wait cancelled for ${file.path}.`);
+	let cancelled = false;
+	let cancel: () => void = () => {};
+	scope.register(() => { cancelled = true; cancel(); });
+	const win = activeWindow;
+	let expected: string | undefined;
+	let indexed: string | undefined;
+	let indexedCache: CachedMetadata | undefined;
+	let finish: () => void = () => {};
+	let timer: number | undefined;
+	scope.register(() => { if (timer !== undefined) win.clearTimeout(timer); });
+	try {
+		const before = await app.vault.read(file);
+		if (cancelled) throw cancellation;
+		scope.registerEvent(app.metadataCache.on('changed', (changed, data, cache) => {
+			if (changed.path !== file.path) return;
+			indexed = data;
+			indexedCache = cache;
+			if (expected !== undefined && data === expected) finish();
+		}));
+		await write();
+		if (cancelled) throw cancellation;
+		expected = await app.vault.read(file);
+		if (cancelled) throw cancellation;
+		if (indexed === expected) return indexedCache;
+		if (expected === before) return;
+		await new Promise<void>((resolve, reject) => {
+			finish = resolve;
+			cancel = () => reject(cancellation);
+			timer = win.setTimeout(() => reject(new Error(`Metadata did not settle for ${file.path}. Run the converter again.`)), 2000);
+		});
+		return indexedCache;
+	} finally {
+		owner.removeChild(scope);
+	}
 }
 
 export async function openNoteInTab(app: App, path: string): Promise<void> {
@@ -82,27 +128,80 @@ export async function writeBaseFiles(app: App, baseFiles: CompanionBaseFile[]): 
 
 const isMarkdown = (file: unknown): file is TFile => file instanceof TFile && file.extension === 'md';
 
-/** Notes in the given folders plus the notes they link to in frontmatter. Empty folder = Obsidian's new-note location. */
-export function collectMusicFiles(app: App, folders: string[]): TFile[] {
-	const roots = folders
-		.map((path) => app.vault.getFolderByPath(normalizePath(path || app.fileManager.getNewFileParent('').path)))
-		.filter((folder): folder is TFolder => folder !== null)
-		.map((folder) => ({ folder, isVaultRoot: folder.isRoot() }));
-	return collectScopedFiles<TFolder, TFile>(roots, {
-		children: (folder) => ({
-			folders: folder.children.filter((child): child is TFolder => child instanceof TFolder),
-			files: folder.children.filter(isMarkdown),
-		}),
-		linked: (file) => (app.metadataCache.getFileCache(file)?.frontmatterLinks ?? [])
+/** Selected folders include all descendants; backlink members can also come from outside that scope. */
+export function collectMusicFiles(app: App, folders: string[], playlistNoteType?: string): TFile[] {
+	const scoped = collectScopedFiles(
+		app.vault.getMarkdownFiles(),
+		folders.map((path) => path === VAULT_ROOT ? VAULT_ROOT : normalizePath(path)),
+		(file) => (app.metadataCache.getFileCache(file)?.frontmatterLinks ?? [])
 			.map((link) => app.metadataCache.getFirstLinkpathDest(link.link, file.path))
 			.filter(isMarkdown),
+	);
+	if (playlistNoteType === undefined) return scoped;
+	const companions = new Set(scoped.filter((file) => {
+		const cache = app.metadataCache.getFileCache(file);
+		return hasType(cache?.frontmatter, playlistNoteType) && cache?.embeds?.some((embed) =>
+			resolveEmbeddedFile(app, embed.link, file.path)?.extension === 'base');
+	}).map((file) => file.path));
+	const files = new Set(scoped);
+	for (const [source, targets] of Object.entries(app.metadataCache.resolvedLinks)) {
+		if (!Object.keys(targets).some((target) => companions.has(target))) continue;
+		const file = app.vault.getFileByPath(source);
+		if (isMarkdown(file)) files.add(file);
+	}
+	return [...files];
+}
+
+export function collectNoteSnapshots(app: App, folders: string[], mapping: YoutubePlaylistPropertyMapping): MarkdownNoteSnapshot[] {
+	return collectMusicFiles(app, folders, mapping.playlistNoteType).map((file) => {
+		const cache = app.metadataCache.getFileCache(file);
+		const frontmatterLinks: Record<string, string[]> = {};
+		for (const link of cache?.frontmatterLinks ?? []) {
+			const target = app.metadataCache.getFirstLinkpathDest(link.link, file.path);
+			const key = link.key.split('.')[0];
+			if (target && key) (frontmatterLinks[key] ??= []).push(target.path);
+		}
+		const base = resolvePlaylistBase(app, file);
+		const embeddedBases = base ? [base.path] : [];
+		return {
+			path: file.path,
+			basename: file.basename,
+			ctime: file.stat.ctime,
+			mtime: file.stat.mtime,
+			frontmatterLinks,
+			embeddedBases,
+			frontmatter: cache?.frontmatter,
+		};
 	});
 }
 
-export function collectNoteSnapshots(app: App, folders: string[]): MarkdownNoteSnapshot[] {
-	return collectMusicFiles(app, folders).map((file) => ({
-		path: file.path,
-		basename: file.basename,
-		frontmatter: app.metadataCache.getFileCache(file)?.frontmatter,
-	}));
+const warnedBasePaths = new WeakMap<App, Set<string>>();
+
+export function warnUnreadableBase(app: App, path: string, error: unknown): void {
+	let warned = warnedBasePaths.get(app);
+	if (!warned) {
+		warned = new Set();
+		warnedBasePaths.set(app, warned);
+	}
+	if (!warned.has(path)) {
+		warned.add(path);
+		console.warn(`[Note Player] Could not read or parse playlist base ${path}; using name-ascending queue order.`, error);
+	}
+}
+
+export async function collectBaseConfigs(app: App, notes: MarkdownNoteSnapshot[], playlistNoteType: string): Promise<Map<string, unknown>> {
+	const paths = new Set(notes.filter((note) => hasType(note.frontmatter, playlistNoteType)).flatMap((note) => note.embeddedBases));
+	const configs = new Map<string, unknown>();
+	for (const path of paths) {
+		const file = app.vault.getFileByPath(path);
+		if (!file) continue;
+		try {
+			const content = await app.vault.cachedRead(file);
+			configs.set(path, parseYaml(content));
+		} catch (error: unknown) {
+			if (!(error instanceof Error)) throw error;
+			warnUnreadableBase(app, path, error);
+		}
+	}
+	return configs;
 }

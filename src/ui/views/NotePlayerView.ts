@@ -24,7 +24,7 @@ import { PlayerSurface, type StreamPhase } from './PlayerSurface';
 import { WaveformProgress } from './WaveformProgress';
 import { renderQueue } from './queue-list';
 import { openPlaylistMenu } from './view-menus';
-import { buildClass, createActionButton, createIconButton, type RunAction } from './view-parts';
+import { buildClass, createActionButton, createIconButton, thumbnailSrc, type RunAction } from './view-parts';
 
 export const VIEW_TYPE_NOTE_PLAYER = 'obsidian-note-player-view';
 export const VIEW_TYPE_LEGACY = 'youtube-note-playlist-view';
@@ -50,7 +50,6 @@ export class NotePlayerView extends ItemView {
 	private unsubscribe: (() => void) | null = null;
 	private resizeObserver: ResizeObserver | null = null;
 	private resizeFrame: { win: Window; id: number } | null = null;
-	private dragFromIndex: number | null = null;
 	private lastRenderedTrackPath: string | null = null;
 	private lastCount: { path: string; count: number; changedAt: number } | null = null;
 	private progressIntervalId: number | null = null;
@@ -205,8 +204,6 @@ export class NotePlayerView extends ItemView {
 					host: this.host,
 					run: this.runAction,
 					selectedPlaylist: this.getSelectedPlaylist(state),
-					getDragFrom: () => this.dragFromIndex,
-					setDragFrom: (index) => { this.dragFromIndex = index; },
 				});
 		} finally {
 			this.isRendering = false;
@@ -317,7 +314,8 @@ export class NotePlayerView extends ItemView {
 		elements.playerPanel.removeClass('onp-hidden');
 		const playerRail = elements.playerPanel.createDiv({ cls: 'onp-now-playing-shell' });
 		playerRail.prepend(this.turntable.el);
-		this.turntable.update(current, playbackState, state.turntableSounds, state.turntableStyle);
+		const label = { ...current, thumbnailUrl: thumbnailSrc(this.host, current.videoId, current.thumbnailUrl) };
+		this.turntable.update(label, playbackState, state.turntableSounds, state.turntableStyle);
 		const summary = playerRail.createDiv({ cls: 'onp-now-playing-summary' });
 		const trackCard = summary.createDiv({ cls: 'onp-track-card onp-track-card--compact onp-track-card--no-thumb onp-player-track-card' });
 		const meta = trackCard.createDiv({ cls: 'onp-track-meta' });

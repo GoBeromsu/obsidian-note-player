@@ -47,17 +47,3 @@ export function toPlaylistTrack(track: MusicTrack): PlaylistTrack {
     tags: track.tags,
   };
 }
-
-export function moveItem<T>(items: readonly T[], fromIndex: number, toIndex: number): T[] {
-  const next = [...items];
-  const [moved] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, moved as T);
-  return next;
-}
-
-/** Moves `item` within the current list, so entries added since the drag started survive. */
-export function moveValue<T>(items: readonly T[], item: T, toIndex: number): T[] {
-  const fromIndex = items.indexOf(item);
-  if (fromIndex < 0) return [...items];
-  return moveItem(items, fromIndex, Math.min(toIndex, items.length - 1));
-}

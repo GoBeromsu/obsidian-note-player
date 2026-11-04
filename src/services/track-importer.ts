@@ -1,16 +1,16 @@
 import { MarkdownView, requestUrl, type App, type TFile } from 'obsidian';
 import { plural } from '../utils/plural';
+import { VAULT_ROOT } from '../domain/config';
 import {
-  buildMusicFrontmatter, classifyBacklinks, classifyImport, isUnavailable, parseFlatPlaylistOutput, parseOembed, trackLabel, type TrackMeta,
+  buildMusicFrontmatter, classifyImport, isUnavailable, parseFlatPlaylistOutput, parseOembed, trackLabel, type TrackMeta,
 } from '../domain/track-import';
 import type { MusicLibrarySnapshot } from '../types/music';
 import type { NotePlayerSettings } from '../types/settings';
 import type { AudioCachePort, PendingImport } from '../types/view';
 import { sanitizeFileName } from '../utils/dedupe';
-import { parsePlaylistTrackReference, toObsidianWikilink } from '../utils/wikilink';
 import { retryUntil } from '../utils/retry';
 import { withTimeout } from '../utils/timeout';
-import { buildYoutubeThumbnailUrl, buildYoutubeWatchUrl, parseYoutubeUrl } from '../utils/youtube';
+import { buildYoutubeWatchUrl, parseYoutubeUrl } from '../utils/youtube';
 import { showNotice } from '../ui/notices';
 import { ensureFolder, getAvailablePath, waitForMetadata } from './vault-io';
 
@@ -134,11 +134,11 @@ export class TrackImporter {
       // Renaming under unsaved editor text could lose it; the next stream resolve heals the track instead.
       if (await this.hasUnsavedEdits(file)) return;
       const title = sanitizeFileName(meta.title, 'Untitled track');
-      const links = this.playlistsLinking(file);
+      const hasBacklinks = Object.values(app.metadataCache.resolvedLinks).some((targets) => targets[file.path]);
       // Other notes link here by name; renaming would break them (or ask the user), so the title goes into metadata.
-      if (links.elsewhere) title !== file.basename && await this.writeMeta(file, meta, true);
+      if (hasBacklinks) title !== file.basename && await this.writeMeta(file, meta, true);
       else {
-        if (title !== file.basename) await this.renameTrack(file, getAvailablePath(app, file.parent?.path ?? '', title), links.playlists);
+        if (title !== file.basename) await this.renameTrack(file, getAvailablePath(app, file.parent?.path ?? '', title));
         await this.writeMeta(file, meta, false);
       }
       await this.libraryHealed(videoId);
@@ -159,16 +159,17 @@ export class TrackImporter {
   }
 
   private async writeMeta(file: TFile, meta: { title: string; author: string }, withTitle: boolean): Promise<void> {
-    if (!withTitle && !meta.author) return;
-    const artistProperty = this.deps.getSettings().musicArtistProperties[0] ?? 'author';
+    const artistProperty = this.deps.getSettings().musicArtistProperty;
+    const writeArtist = artistProperty.trim() !== '' && meta.author !== '';
+    if (!withTitle && !writeArtist) return;
     await this.deps.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
       if (withTitle) frontmatter.title = meta.title;
-      if (meta.author) frontmatter[artistProperty] = meta.author;
+      if (writeArtist) frontmatter[artistProperty] = meta.author;
     });
   }
 
-  /** vault.rename never prompts; the playlists that linked the note are relinked by hand. */
-  private async renameTrack(file: TFile, target: string, playlists: Map<string, Set<string>>): Promise<void> {
+  /** Membership stays on the track note when its title changes. */
+  private async renameTrack(file: TFile, target: string): Promise<void> {
     const from = file.path;
     this.deps.onTrackRename(from, target);
     try {
@@ -176,39 +177,6 @@ export class TrackImporter {
     } catch (error) {
       this.deps.onTrackRename(target, from);
       throw error;
-    }
-    await this.relink(playlists, file);
-  }
-
-  /** Playlist entries that resolve to `file`, keyed by playlist path, and whether any other note links to it. */
-  private playlistsLinking(file: TFile): { playlists: Map<string, Set<string>>; elsewhere: boolean } {
-    const { app } = this.deps;
-    const property = this.deps.getSettings().playlistTrackProperty;
-    const playlistPaths = new Set(this.deps.getLibrary().playlists.map((playlist) => playlist.path));
-    const { playlistSources, elsewhere } = classifyBacklinks(app.metadataCache.resolvedLinks, file.path, playlistPaths);
-    const playlists = new Map<string, Set<string>>();
-    for (const source of playlistSources) {
-      const entries: unknown = app.metadataCache.getCache(source)?.frontmatter?.[property];
-      const own = (Array.isArray(entries) ? entries : []).filter((entry): entry is string => {
-        const reference = typeof entry === 'string' ? parsePlaylistTrackReference(entry) : null;
-        return reference !== null && app.metadataCache.getFirstLinkpathDest(reference.normalized, source) === file;
-      });
-      playlists.set(source, new Set(own));
-    }
-    return { playlists, elsewhere };
-  }
-
-  private async relink(playlists: Map<string, Set<string>>, file: TFile): Promise<void> {
-    const { app } = this.deps;
-    const property = this.deps.getSettings().playlistTrackProperty;
-    for (const [path, entries] of playlists) {
-      const playlist = app.vault.getFileByPath(path);
-      if (!playlist) continue;
-      await app.fileManager.processFrontMatter(playlist, (frontmatter: Record<string, unknown>) => {
-        const current: unknown = frontmatter[property];
-        if (!Array.isArray(current)) return;
-        frontmatter[property] = current.map((entry: unknown) => typeof entry === 'string' && entries.has(entry) ? toObsidianWikilink(file.path) : entry);
-      });
     }
   }
 
@@ -246,7 +214,7 @@ export class TrackImporter {
         paths.push(plan.path);
         continue;
       }
-      lastCreated = await this.createTrackNote({ ...entry, thumbnailUrl: entry.title === entry.videoId ? '' : buildYoutubeThumbnailUrl(entry.videoId) });
+      lastCreated = await this.createTrackNote(entry);
       known.push({ path: lastCreated.path, videoId: entry.videoId });
       paths.push(lastCreated.path);
     }
@@ -266,7 +234,6 @@ export class TrackImporter {
       videoId,
       title: videoId,
       author: '',
-      thumbnailUrl: '',
     };
     const watchUrl = buildYoutubeWatchUrl(videoId);
     // A slow or unreachable oEmbed must not hold up the import; the bare id stands in as the title until yt-dlp heals it.
@@ -278,13 +245,13 @@ export class TrackImporter {
       OEMBED_TIMEOUT_MS,
       null,
     ), 2, OEMBED_RETRY_DELAY_MS);
-    return oembed ? { videoId, ...oembed, thumbnailUrl: oembed.thumbnailUrl || buildYoutubeThumbnailUrl(videoId) } : fallback;
+    return oembed ? { videoId, ...oembed } : fallback;
   }
 
   private async createTrackNote(meta: TrackMeta): Promise<TFile> {
     const { app } = this.deps;
     const settings = this.deps.getSettings();
-    const folder = settings.musicFolder || app.fileManager.getNewFileParent('').path;
+    const folder = settings.musicFolder === VAULT_ROOT ? '' : settings.musicFolder;
     await ensureFolder(app, folder);
     const path = getAvailablePath(app, folder, sanitizeFileName(meta.title, 'Untitled track'));
     const file = await app.vault.create(path, `![](${buildYoutubeWatchUrl(meta.videoId)})\n`);

@@ -1,24 +1,24 @@
-import { debounce, Plugin, WorkspaceLeaf } from 'obsidian';
+import { debounce, normalizePath, Plugin, WorkspaceLeaf } from 'obsidian';
 import { plural } from './utils/plural';
 import { MUSIC_BASE_NAME, PLAYLISTS_BASE_NAME } from './domain/base-files';
-import { DEFAULT_SETTINGS, normalizeSettings } from './domain/config';
+import { DEFAULT_SETTINGS, normalizeSettings, VAULT_ROOT } from './domain/config';
 import { buildMusicLibrary } from './domain/library-index';
 import { isUnavailable, trackLabel } from './domain/track-import';
 import { PlaybackStateManager } from './domain/playback-state';
-import { resolveSelectedPlaylistPath, getPlaylistOrThrow, successorAfterRemoval, moveItem, moveValue, toPlaylistSummary, toPlaylistTrack } from './domain/playlist-manager';
-import { createPlaylistNoteContent, mergeTrackEntries } from './domain/playlist-storage';
+import { resolveSelectedPlaylistPath, successorAfterRemoval, toPlaylistSummary, toPlaylistTrack } from './domain/playlist-manager';
 import type { MusicLibrarySnapshot, PlaylistNote } from './types/music';
 import type { NotePlayerSettings } from './types/settings';
 import type { AudioCachePort, PlaylistTrack, PlaylistViewHost, PlaylistViewState } from './types/view';
-import { dedupe, sanitizeFileName } from './utils/dedupe';
 import { AudioCacheService } from './services/audio-cache';
 import { PeaksStore } from './services/peaks-store';
+import { ThumbnailCacheService } from './services/thumbnail-cache';
 import { openCompanionBase, writeCompanionBaseFiles } from './services/companion-bases';
 import { TrackImporter } from './services/track-importer';
-import { ensureFolder, getAvailablePath, openNoteInTab, collectNoteSnapshots, updateFrontmatter, waitForMetadata } from './services/vault-io';
+import { PlaylistService } from './services/playlist-service';
+import { convertPlaylistNotes } from './services/playlist-migration-service';
+import { openNoteInTab, collectNoteSnapshots, collectBaseConfigs } from './services/vault-io';
 import { registerCommands } from './ui/commands';
 import { showNotice } from './ui/notices';
-import { parsePlaylistTrackReference } from './utils/wikilink';
 import type { PlaybackState } from './types/playback';
 import { NotePlayerSettingsTab } from './ui/settings';
 import { VIEW_TYPE_NOTE_PLAYER, VIEW_TYPE_LEGACY, NotePlayerView } from './ui/views/NotePlayerView';
@@ -34,32 +34,41 @@ const EMPTY_LIBRARY: MusicLibrarySnapshot = {
 
 export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost {
   settings: NotePlayerSettings = DEFAULT_SETTINGS;
-
   private library: MusicLibrarySnapshot = EMPTY_LIBRARY;
+  private refreshGeneration = 0;
   private changeListeners = new Set<() => void>();
-  private readonly scheduleRefresh = debounce(() => { void this.refreshIndex(); }, 250, true);
+  private readonly scheduleRefresh = debounce(() => { if (this.app.workspace.layoutReady) void this.refreshIndex(); }, 250, true);
   private readonly playback = new PlaybackStateManager();
-  private playlistEdits: Promise<void> = Promise.resolve();
   private errorMessage: string | null = null;
   private audioCacheService: AudioCacheService | null = null;
   private peaksStore: PeaksStore | null = null;
+  private thumbnailCache: ThumbnailCacheService | null = null;
   private vaultBasePath = '';
   private playerSurface: PlayerSurface | null = null;
   private playerHostEl: HTMLDivElement | null = null;
   private viewPlaybackState: PlaybackState = 'idle';
   /** Set by an explicit play so the track starts even with autoplay off. */
   private playIntent = false;
-  private playingPlaylistPath: string | null = null;
   private downloadStatusBar: DownloadStatusBar | null = null;
   private volume: VolumeController | null = null;
+  private readonly playlists = new PlaylistService({
+    app: this.app,
+    owner: this,
+    getSettings: () => this.settings,
+    getLibrary: () => this.library,
+    refresh: () => this.refreshIndex(),
+    selectPlaylist: (path) => this.selectPlaylist(path),
+    saveSettings: () => this.saveData(this.settings),
+    invalidateRefresh: () => { this.refreshGeneration++; },
+  });
   private readonly importer = new TrackImporter({
     app: this.app,
     getSettings: () => this.settings,
     getLibrary: () => this.library,
     getSelectedPlaylistPath: () => this.selectedPlaylist()?.path ?? null,
     getAudioCache: () => this.audioCacheService,
-    createPlaylist: (name) => this.createPlaylistNote(name, [], true),
-    addTracks: (playlistPath, paths) => this.addPathsToPlaylist(playlistPath, paths),
+    createPlaylist: (name) => this.playlists.createPlaylist(name),
+    addTracks: (playlistPath, paths) => this.playlists.addTracks(playlistPath, paths, false),
     playIfIdle: (path) => {
       if (this.viewPlaybackState !== 'playing') void this.playTrack(path);
     },
@@ -69,7 +78,15 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    await this.refreshIndex();
+    let migratedFolders = false;
+    for (const key of ['musicFolder', 'playlistFolder'] as const) {
+      if (this.settings[key] !== '') continue;
+      const folder = normalizePath(this.app.fileManager.getNewFileParent('').path);
+      this.settings[key] = folder === '' || folder === VAULT_ROOT ? VAULT_ROOT : folder;
+      migratedFolders = true;
+    }
+    if (migratedFolders) await this.saveData(this.settings);
+    this.thumbnailCache = ThumbnailCacheService.attach(this, () => this.notifyChange());
 
     this.vaultBasePath = (this.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? '';
     this.audioCacheService = this.createAudioCache();
@@ -112,6 +129,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       openView: () => this.activateView(),
       refreshLibrary: () => this.refresh(true),
       refreshBases: () => this.refreshCompanionBases(),
+      convertPlaylistNotes: () => convertPlaylistNotes(this),
       addActiveNote: () => this.addActiveNoteToSelectedPlaylist(),
       loadActivePlaylist: () => this.activateActivePlaylist(),
       addTrackFromUrl: (input) => this.addTrackFromUrl(input),
@@ -123,12 +141,17 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     this.addSettingTab(new NotePlayerSettingsTab(this.app, this));
     this.registerVaultRefreshEvents();
 
-    // Enabling mid-session (reload, update) runs this before Obsidian restores the existing leaf, which would duplicate the view.
-    if (this.settings.autoOpenOnStartup && !this.app.workspace.layoutReady) {
-      this.app.workspace.onLayoutReady(() => {
-        void this.activateView();
+    // A reload must defer discovery too, even when onLayoutReady invokes its callback immediately.
+    const openOnReady = this.settings.autoOpenOnStartup && !this.app.workspace.layoutReady;
+    let live = true;
+    this.register(() => { live = false; });
+    this.app.workspace.onLayoutReady(() => {
+      queueMicrotask(() => {
+        if (!live) return;
+        void this.refreshIndex();
+        if (openOnReady) void this.activateView();
       });
-    }
+    });
   }
 
   onunload(): void {
@@ -144,8 +167,8 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   }
 
   async loadSettings(): Promise<void> {
-    const loaded = { ...DEFAULT_SETTINGS, ...(await this.loadData() as Partial<NotePlayerSettings>) };
-    this.settings = normalizeSettings(loaded);
+    const loaded = await this.loadData() as Parameters<typeof normalizeSettings>[0] | null;
+    this.settings = normalizeSettings(loaded ?? {});
   }
 
   async saveSettings(): Promise<void> {
@@ -216,6 +239,10 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     };
   }
 
+  onStateChange(callback: () => void): () => void {
+    return this.subscribe(callback);
+  }
+
   async refresh(notify = false): Promise<void> {
     await this.refreshIndex();
 
@@ -255,15 +282,16 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   }
 
   async createPlaylist(name: string): Promise<void> {
-    await this.createPlaylistNote(name);
+    const path = await this.playlists.createPlaylist(name);
+    await this.openPlaylist(path);
   }
-
   togglePlayback(): Promise<void> {
     if (this.viewPlaybackState === 'playing') {
       this.playerSurface?.pause();
       return Promise.resolve();
     }
-    const path = this.playback.currentTrackPath ?? this.currentQueue()[0]?.path;
+    const queue = this.selectedPlaylist()?.trackPaths ?? [];
+    const path = queue.find((path) => path === this.playback.currentTrackPath) ?? queue[0];
     if (!path) {
       showNotice('playlist_missing');
       return Promise.resolve();
@@ -274,7 +302,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   playTrack(path: string): Promise<void> {
     this.playIntent = true;
     const selected = this.selectedPlaylist();
-    if (selected?.trackPaths.includes(path)) this.playingPlaylistPath = selected.path;
+    if (selected?.trackPaths.includes(path)) this.playlists.playingPlaylistPath = selected.path;
     // The surface keeps the loaded track, so re-rendering it would not resume a paused one.
     if (path === this.playback.currentTrackPath && this.playerSurface?.play()) return Promise.resolve();
     this.playback.play(path, this.library.tracks);
@@ -285,7 +313,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   playPrevious(): Promise<void> {
     if (this.playback.previous(this.currentQueue())) {
-      this.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
+      this.playlists.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
       this.playIntent = true;
       this.notifyChange();
       void this.prefetchNext();
@@ -296,7 +324,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
   /** `explicit` is false when a track ends on its own, so autoplay alone decides whether the next one starts. */
   playNext(explicit = true): Promise<void> {
     if (this.playback.next(this.currentQueue())) {
-      this.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
+      this.playlists.playingPlaylistPath ??= this.selectedPlaylist()?.path ?? null;
       this.playIntent = explicit;
       this.notifyChange();
       void this.prefetchNext();
@@ -311,7 +339,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       return;
     }
 
-    await this.addTrackToSpecificPlaylist(playlistPath, trackPath);
+    await this.playlists.addTracks(playlistPath, [trackPath]);
     if (!this.playback.currentTrackPath) {
       this.playback.currentTrackPath = trackPath;
       this.notifyChange();
@@ -320,10 +348,6 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   addTrackFromUrl(input: string): Promise<void> {
     return this.importer.importFromInput(input);
-  }
-
-  private addPathsToPlaylist(playlistPath: string, paths: string[]): Promise<void> {
-    return this.savePlaylistTracks(playlistPath, (current) => dedupe([...current, ...paths]), { refresh: true });
   }
 
   async addActiveNoteToPlaylist(): Promise<void> {
@@ -338,7 +362,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     }
 
     const queueBefore = this.currentQueue().map((track) => track.path);
-    await this.removeTrackFromSpecificPlaylist(playlistPath, trackPath);
+    await this.playlists.removeTrack(playlistPath, trackPath);
     if (this.playback.currentTrackPath === trackPath) {
       // A paused track's replacement must not start just because an earlier play left the intent set.
       this.playIntent = this.viewPlaybackState === 'playing';
@@ -347,27 +371,12 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     }
   }
 
-  async moveTrackInPlaylist(fromIndex: number, toIndex: number): Promise<void> {
-    const playlist = this.selectedPlaylist();
-    if (!playlist || fromIndex === toIndex) return;
-    if (fromIndex < 0 || toIndex < 0 || fromIndex >= playlist.trackPaths.length || toIndex >= playlist.trackPaths.length) {
-      return;
-    }
-
-    const movedPath = playlist.trackPaths[fromIndex] as string;
-    playlist.trackPaths = moveItem(playlist.trackPaths, fromIndex, toIndex);
-    playlist.tracks = moveItem(playlist.tracks, fromIndex, toIndex);
-    this.notifyChange();
-
-    await this.savePlaylistTracks(playlist.path, (current) => moveValue(current, movedPath, toIndex));
+  openNote(path: string): Promise<void> {
+    return openNoteInTab(this.app, path);
   }
 
-  async openNote(path: string): Promise<void> {
-    await this.revealTrack(path);
-  }
-
-  async openPlaylist(path: string): Promise<void> {
-    await this.revealPlaylist(path);
+  openPlaylist(path: string): Promise<void> {
+    return openNoteInTab(this.app, path);
   }
 
   async openBase(kind: 'music' | 'playlists'): Promise<void> {
@@ -393,6 +402,10 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     return this.peaksStore;
   }
 
+  getThumbnailCache(): ThumbnailCacheService | null {
+    return this.thumbnailCache;
+  }
+
   getAudioCacheService(): AudioCachePort | null {
     return this.audioCacheService;
   }
@@ -401,54 +414,6 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     this.settings.autoplayEnabled = enabled;
     await this.saveSettings();
     this.notifyChange();
-  }
-
-  private async addTrackToSpecificPlaylist(playlistPath: string, trackPath: string): Promise<void> {
-    const playlist = getPlaylistOrThrow(playlistPath, this.library.playlists);
-    await this.savePlaylistTracks(playlistPath, (current) => dedupe([...current, trackPath]), { refresh: true });
-
-    const track = this.library.tracks.find((entry) => entry.path === trackPath);
-    showNotice('track_added', {
-      title: track ? trackLabel(track, true) : trackPath,
-      playlist: playlist.title,
-    });
-  }
-
-  private async removeTrackFromSpecificPlaylist(playlistPath: string, trackPath: string): Promise<void> {
-    const playlist = getPlaylistOrThrow(playlistPath, this.library.playlists);
-    await this.savePlaylistTracks(playlistPath, (current) => current.filter((entry) => entry !== trackPath), { refresh: true });
-
-    const track = this.library.tracks.find((entry) => entry.path === trackPath);
-    showNotice('track_removed', {
-      title: track ? trackLabel(track, true) : trackPath,
-      playlist: playlist.title,
-    });
-  }
-
-  private async createPlaylistNote(name: string, seedTrackPaths: string[] = [], quiet = false): Promise<string> {
-    const filePath = getAvailablePath(this.app, this.settings.playlistFolder, sanitizeFileName(name));
-    await ensureFolder(this.app, this.settings.playlistFolder);
-    const file = await this.app.vault.create(
-      filePath,
-      createPlaylistNoteContent({ trackPaths: seedTrackPaths }, this.settings),
-    );
-    await waitForMetadata(this.app, file);
-
-    this.settings.lastPlaylistPath = filePath;
-    await this.saveSettings();
-    await this.refreshIndex();
-
-    // An import that auto-creates its playlist reports once, with the "Added" notice.
-    if (!quiet) showNotice('playlist_created', { name });
-    return filePath;
-  }
-
-  revealTrack(path: string): Promise<void> {
-    return openNoteInTab(this.app, path);
-  }
-
-  revealPlaylist(path: string): Promise<void> {
-    return openNoteInTab(this.app, path);
   }
 
   private async activateView(): Promise<void> {
@@ -471,16 +436,23 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
     const schedule = () => this.scheduleRefresh();
     this.registerEvent(metadataCache.on('changed', schedule));
     this.registerEvent(metadataCache.on('resolved', schedule));
-    this.registerEvent(vault.on('rename', schedule));
+    this.registerEvent(vault.on('rename', (file, oldPath) => this.playlists.followRename(file.path, oldPath, schedule)));
     this.registerEvent(vault.on('delete', schedule));
     this.registerEvent(vault.on('create', schedule));
+    this.registerEvent(vault.on('modify', (file) => {
+      if (file.path.endsWith('.base')) schedule();
+    }));
   }
 
-  // Indexing is synchronous; flashing a loading state here would collapse the view and reset its scroll on every vault edit.
+  // Keep the existing view visible while paired base configs load.
   private async refreshIndex(): Promise<void> {
+    const generation = ++this.refreshGeneration;
     this.errorMessage = null;
     try {
-      this.library = buildMusicLibrary(collectNoteSnapshots(this.app, [this.settings.musicFolder, this.settings.playlistFolder]), this.settings);
+      const notes = collectNoteSnapshots(this.app, [this.settings.musicFolder, this.settings.playlistFolder], this.settings);
+      const baseConfigs = await collectBaseConfigs(this.app, notes, this.settings.playlistNoteType);
+      if (generation !== this.refreshGeneration) return;
+      this.library = buildMusicLibrary(notes, this.settings, baseConfigs);
 
       const selected = resolveSelectedPlaylistPath(this.settings.lastPlaylistPath, this.library.playlists);
       if (this.library.playlists.length > 0 && selected !== this.settings.lastPlaylistPath) {
@@ -494,39 +466,12 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       this.playback.validateCurrent(this.library.tracks);
 
     } catch (error) {
+      if (generation !== this.refreshGeneration) return;
       this.errorMessage = error instanceof Error ? error.message : String(error);
       console.error('[Note Player] Failed to refresh library', error);
     } finally {
-      this.notifyChange();
+      if (generation === this.refreshGeneration) this.notifyChange();
     }
-  }
-
-  /** Edits run one at a time and each builds on the list the previous one wrote, so concurrent adds never drop a track. */
-  private savePlaylistTracks(
-    playlistPath: string,
-    edit: (trackPaths: string[]) => string[],
-    opts: { refresh?: boolean } = {},
-  ): Promise<void> {
-    const run = this.playlistEdits.then(async () => {
-      const playlist = getPlaylistOrThrow(playlistPath, this.library.playlists);
-      const trackPaths = edit(playlist.trackPaths);
-      const missing = new Set(playlist.missingTrackPaths);
-      const isOwned = (entry: string) => {
-        const reference = parsePlaylistTrackReference(entry);
-        return reference !== null && !missing.has(reference.normalized);
-      };
-      await updateFrontmatter(this.app, playlistPath, (frontmatter) => {
-        const property = this.settings.playlistTrackProperty;
-        const existing: unknown = frontmatter[property];
-        frontmatter[property] = mergeTrackEntries(Array.isArray(existing) ? existing : [], trackPaths, isOwned);
-      });
-
-      if (opts.refresh) {
-        await this.refreshIndex();
-      }
-    });
-    this.playlistEdits = run.catch(() => undefined);
-    return run;
   }
 
   private async activateActivePlaylist(): Promise<void> {
@@ -553,7 +498,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
       return;
     }
 
-    await this.addTrackToSpecificPlaylist(playlistPath, track.path);
+    await this.playlists.addTracks(playlistPath, [track.path]);
   }
 
   private selectedPlaylist(): PlaylistNote | null {
@@ -563,7 +508,7 @@ export default class NotePlayerPlugin extends Plugin implements PlaylistViewHost
 
   // Next/previous follow the playlist the track was started from, not the one being browsed.
   private currentQueue(): PlaylistTrack[] {
-    const playing = this.library.playlists.find((playlist) => playlist.path === this.playingPlaylistPath);
+    const playing = this.library.playlists.find((playlist) => playlist.path === this.playlists.playingPlaylistPath);
     return (playing ?? this.selectedPlaylist())?.tracks.map(toPlaylistTrack) ?? [];
   }
 
