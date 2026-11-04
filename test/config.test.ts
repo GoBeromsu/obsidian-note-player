@@ -162,7 +162,9 @@ describe('settings definitions', () => {
     if (!group || !('items' in group)) throw new Error('Missing companion group');
     vi.mocked(convertPlaylistNotes).mockClear();
 
-    renderRow(group.items ?? [], 'Legacy playlist notes').click();
+    const action = renderRow(group.items ?? [], 'Legacy playlist notes');
+    expect(action.buttonText).toBe('Convert playlists and bases');
+    action.click();
 
     expect(convertPlaylistNotes).toHaveBeenCalledTimes(1);
     expect(convertPlaylistNotes).toHaveBeenCalledWith(host);

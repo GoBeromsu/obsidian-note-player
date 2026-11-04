@@ -78,6 +78,27 @@ afterEach(() => {
 });
 
 describe('playlist migration service', () => {
+	it.each([1, 2])('counts each converted playlist once with %i cards-view upgrades', async (count) => {
+		const host = await fixture('tracks');
+		const note = host.app.vault.getFileByPath('Playlists/Mix.md');
+		if (!note) throw new Error('Missing playlist fixture');
+		await host.app.vault.process(note, (content) => content + '![[Bases/Mix.base]]\n');
+		await host.app.vault.create('Bases/Mix.base', 'views:\n  - type: note-player\n    name: Player\n');
+		if (count === 2) {
+			await host.app.vault.create('Bases/Next.base', 'views:\n  - type: note-player\n    name: Player\n');
+			await host.app.vault.create('Playlists/Next.md',
+				'---\n{"type":"music-playlist"}\n---\n![[Bases/Next.base]]\n');
+		}
+		const { done } = await openPreview(host);
+
+		preview.finish?.(true);
+		await done;
+
+		expect(notices.at(-1)).toBe(count === 1
+			? 'Converted 1 playlist, linked 1 track, 1 missing.\n1 playlist base switched to the cards view.'
+			: 'Converted 2 playlists, linked 1 track, 1 missing.\n2 playlist bases switched to the cards view.');
+	});
+
 	it.each(['>-', '|-'])('preserves parsed base data with %s block scalars, comments, quoted keys, and other views', async (style) => {
 		const host = await fixture();
 		const note = host.app.vault.getFileByPath('Playlists/Mix.md');

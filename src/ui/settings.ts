@@ -170,10 +170,10 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 					},
 					{
 						name: 'Legacy playlist notes',
-						desc: 'Preview conversion to Bases. Original track lists are preserved.',
+						desc: 'Preview playlist conversion and cards-view upgrades. Original track lists are preserved.',
 						render: (setting) => {
 							setting.addButton((button) =>
-								button.setButtonText('Convert playlist notes').onClick(() => {
+								button.setButtonText('Convert playlists and bases').onClick(() => {
 									void convertPlaylistNotes(this.host);
 								}),
 							);

@@ -20,10 +20,14 @@ export class MigrationPreviewModal extends Modal {
 		const { totals } = this.plan;
 		const playlists = this.plan.playlists.filter((playlist) =>
 			playlist.createBase || playlist.appendEmbed || playlist.renameLegacyKey || playlist.membershipAdds.length > 0);
+		const playlistCount = new Set([
+			...playlists.map((playlist) => playlist.notePath),
+			...(this.plan.cardsUpgrades ?? []).map((upgrade) => upgrade.notePath),
+		]).size;
 		const missingCount = playlists.reduce((count, playlist) => count + playlist.missing.length, 0);
 		const summary = this.contentEl.createDiv({ cls: 'onp-migration-summary' });
 		const counts = [
-			`${plural(totals.playlists, 'playlist')} will convert`,
+			`${plural(playlistCount, 'playlist')} will convert`,
 			...(this.plan.cardsUpgrades?.length
 				? [`${plural(this.plan.cardsUpgrades.length, 'playlist base')} will switch to the cards view`] : []),
 			`${plural(totals.membershipAdds, 'track')} will be linked`,
@@ -92,8 +96,8 @@ export class MigrationPreviewModal extends Modal {
 			})
 			.addButton((button) => {
 				this.convertButton = button;
-				button.setButtonText(`Convert ${plural(totals.playlists + (this.plan.cardsUpgrades?.length ?? 0), 'playlist')}`).setCta()
-				.setDisabled(totals.playlists === 0 && !this.plan.cardsUpgrades?.length).onClick(() => {
+				button.setButtonText(`Convert ${plural(playlistCount, 'playlist')}`).setCta()
+				.setDisabled(playlistCount === 0).onClick(() => {
 					if (this.confirmed) return;
 					this.confirmed = true;
 					this.cancelButton?.setButtonText('Hide');

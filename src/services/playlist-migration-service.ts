@@ -99,7 +99,7 @@ async function applyMigration(
 	const { app, settings } = host;
 	const { plan: preview } = scan;
 	const progress = new Notice('', 0);
-	let converted = 0;
+	const converted = new Set<string>();
 	let linked = 0;
 	let missing = 0;
 	let upgraded = 0;
@@ -192,7 +192,7 @@ async function applyMigration(
 					|| key !== 'tracks_legacy' && Object.hasOwn(fm, key)) {
 					throw new Error('Companion embed or archive was not preserved. Run the converter again.');
 				}
-				converted++;
+				converted.add(playlist.notePath);
 				missing += playlist.missing.length;
 				reportProgress(index + 1, playlists.length, playlist.notePath, 'converted');
 			} catch (error: unknown) {
@@ -221,6 +221,7 @@ async function applyMigration(
 					return upgrade.after;
 				});
 				upgraded++;
+				converted.add(upgrade.notePath);
 				reportProgress(upgraded, preview.cardsUpgrades?.length ?? 0, upgrade.basePath, 'converted');
 			} catch (error: unknown) {
 				if (signal.aborted) throw error;
@@ -236,9 +237,9 @@ async function applyMigration(
 		progress.hide();
 	}
 	const summary = [
-		renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: converted, tracks: linked, missing }),
+		renderNotice(NOTICE_CATALOG.migration_complete.template, { playlists: converted.size, tracks: linked, missing }),
 		...(upgraded ? [renderNotice(NOTICE_CATALOG.migration_cards_complete.template, { bases: upgraded })] : []),
-	].join(' ');
+	].join('\n');
 	const skipped = [...preview.conflicts, ...preview.invalid];
 	new Notice([summary, ...errors, ...(skipped.length ? [`Skipped: ${skipped.join(', ')}.`] : [])].join('\n'));
 }
