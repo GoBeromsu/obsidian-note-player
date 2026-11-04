@@ -19,7 +19,7 @@ describe('playlist cards upgrade', () => {
 		const result = upgradePlaylistCards(source, mapping, { parse, stringify });
 		expect(parse(result)).toEqual({
 			properties: { 'file.name': { displayName: 'Title' }, 'note.performer': { displayName: 'Artist' } },
-			views: [{ type: 'cards', name: 'Player', image: 'note.my "art"', imageFit: '', imageAspectRatio: 0.5625 }],
+			views: [{ type: 'cards', name: 'Cards', image: 'note.my "art"', imageFit: '', imageAspectRatio: 0.5625 }],
 		});
 		expect(upgradePlaylistCards(result, mapping, { parse, stringify })).toBe(result);
 	});
@@ -49,5 +49,16 @@ describe('playlist cards upgrade', () => {
 			properties: { 'file.name': { displayName: 'Song' }, 'note.performer': { displayName: 'Band' }, 'note.rating': { displayName: 'Stars' } },
 			views: [{ imageFit: '', imageAspectRatio: 0.5625 }],
 		});
+	});
+
+	it.each(['My collection', 'player', '', undefined])('preserves the chosen name %s and other view names', (name) => {
+		const source = stringify({ views: [{ type: 'note-player', ...(name === undefined ? {} : { name }) }, { type: 'table', name: 'Player' }] });
+
+		const result = parse(upgradePlaylistCards(source, DEFAULT_PROPERTY_MAPPING, { parse, stringify }));
+
+		expect(result.views[0]).toMatchObject({ type: 'cards' });
+		if (name === undefined) expect(result.views[0]).not.toHaveProperty('name');
+		else expect(result.views[0].name).toBe(name);
+		expect(result.views[1]).toEqual({ type: 'table', name: 'Player' });
 	});
 });

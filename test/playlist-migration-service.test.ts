@@ -156,6 +156,7 @@ filters:
 		host.settings.musicThumbnailProperty = 'poster';
 		const intended = parse(source);
 		intended.views[0].type = 'cards';
+		intended.views[0].name = 'Cards';
 		intended.views[0].image = 'note.poster';
 		intended.views[0].imageFit = '';
 		intended.views[0].imageAspectRatio = 0.5625;
@@ -288,7 +289,7 @@ filters:
 			filters: { and: ['type == "music"'] },
 			properties: { 'file.name': { displayName: 'Title' }, 'note.author': { displayName: 'Artist' } },
 			views: [
-				{ type: 'cards', name: 'Player', image: 'note.poster', filters: 'author == "A"',
+				{ type: 'cards', name: 'Cards', image: 'note.poster', filters: 'author == "A"',
 					imageFit: '', imageAspectRatio: 0.5625,
 					sort: [{ property: 'file.mtime', direction: 'DESC' }], order: ['file.name', 'note.author'] },
 				{ type: 'table', name: 'My table', order: ['file.name'] },

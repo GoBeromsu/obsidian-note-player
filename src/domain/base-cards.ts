@@ -23,7 +23,11 @@ export function upgradePlaylistCards(
 		views: original.views.map((view: unknown) => {
 			if (!isRecord(view) || view.type !== 'note-player') return view;
 			changed = true;
-			return { ...view, type: 'cards', image: `note.${mapping.musicThumbnailProperty}`, imageFit: '', imageAspectRatio: 0.5625 };
+			return {
+				...view,
+				...(view.name === 'Player' ? { name: 'Cards' } : {}),
+				type: 'cards', image: `note.${mapping.musicThumbnailProperty}`, imageFit: '', imageAspectRatio: 0.5625,
+			};
 		}),
 	};
 	if (!changed) return content;
