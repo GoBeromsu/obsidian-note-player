@@ -3,19 +3,31 @@ import { App } from 'obsidian';
 import { PlaylistNameModal } from '../src/ui/views/PlaylistNameModal';
 
 interface Rendered {
-	input: (EventTarget & { value: string }) | undefined;
+	input: (EventTarget & { value: string; ownerDocument: { activeElement: unknown } }) | undefined;
 	buttons: Map<string, () => void>;
+	enterHandler: ((event: { isComposing: boolean; target: unknown }) => boolean) | undefined;
+	inputKeydownListeners: number;
 	closes: number;
 	notices: number;
 }
 const rendered = vi.hoisted((): Rendered => ({
-	input: undefined, buttons: new Map(), closes: 0, notices: 0,
+	input: undefined, buttons: new Map(), enterHandler: undefined,
+	inputKeydownListeners: 0, closes: 0, notices: 0,
 }));
 
 vi.mock('obsidian', () => {
 	class Input extends EventTarget {
 		value = '';
+		ownerDocument = { activeElement: this };
 		focus() {}
+		addEventListener(
+			type: string,
+			callback: EventListenerOrEventListenerObject | null,
+			options?: boolean | AddEventListenerOptions,
+		) {
+			if (type === 'keydown') rendered.inputKeydownListeners++;
+			super.addEventListener(type, callback, options);
+		}
 	}
 	class TextComponent {
 		readonly inputEl = new Input();
@@ -34,6 +46,11 @@ vi.mock('obsidian', () => {
 		Modal: class {
 			readonly contentEl = { empty() {} };
 			readonly modalEl = { addClass() {} };
+			readonly scope = {
+				register: (_modifiers: string[], key: string, callback: (event: { isComposing: boolean; target: unknown }) => boolean) => {
+					if (key === 'Enter') rendered.enterHandler = callback;
+				},
+			};
 			setTitle() {}
 			close() { rendered.closes++; }
 		},
@@ -51,9 +68,10 @@ vi.mock('obsidian', () => {
 beforeEach(() => {
 	rendered.input = undefined;
 	rendered.buttons.clear();
+	rendered.enterHandler = undefined;
+	rendered.inputKeydownListeners = 0;
 	rendered.closes = 0;
 	rendered.notices = 0;
-	vi.stubGlobal('window', { setTimeout: vi.fn() });
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -72,7 +90,11 @@ describe('create playlist name submission', () => {
 		if (!input) throw new Error('Missing name input');
 		input.value = value;
 
-		if (action === 'Enter') input.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', isComposing: false }));
+		if (action === 'Enter') {
+			const handler = rendered.enterHandler;
+			if (!handler) throw new Error('Missing modal Enter handler');
+			handler({ isComposing: false, target: input });
+		}
 		else {
 			const click = rendered.buttons.get(action);
 			if (!click) throw new Error('Missing create button');
@@ -86,17 +108,39 @@ describe('create playlist name submission', () => {
 
 	it.each([
 		{ key: 'Enter', isComposing: true },
-		{ key: 'ArrowDown', isComposing: false },
-	])('does not submit $key while composing=$isComposing', ({ key, isComposing }) => {
+	])('does not submit Enter while composing=$isComposing', ({ isComposing }) => {
 		const submit = vi.fn();
 		new PlaylistNameModal(new App(), submit).onOpen();
 		const input = rendered.input;
 		if (!input) throw new Error('Missing name input');
 		input.value = 'Night mix';
 
-		input.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key, isComposing }));
+		const handler = rendered.enterHandler;
+		if (!handler) throw new Error('Missing modal Enter handler');
+		expect(handler({ isComposing, target: input })).toBe(true);
 
 		expect(submit).not.toHaveBeenCalled();
 		expect(rendered.closes).toBe(0);
+	});
+
+	it('does not submit Enter when focus is outside the name input', () => {
+		const submit = vi.fn();
+		new PlaylistNameModal(new App(), submit).onOpen();
+		const input = rendered.input;
+		if (!input) throw new Error('Missing name input');
+		input.value = 'Night mix';
+		input.ownerDocument.activeElement = {};
+		const handler = rendered.enterHandler;
+		if (!handler) throw new Error('Missing modal Enter handler');
+
+		expect(handler({ isComposing: false, target: {} })).toBe(true);
+		expect(submit).not.toHaveBeenCalled();
+		expect(rendered.closes).toBe(0);
+	});
+
+	it('does not attach a keydown listener directly to the input', () => {
+		new PlaylistNameModal(new App(), vi.fn()).onOpen();
+
+		expect(rendered.inputKeydownListeners).toBe(0);
 	});
 });
