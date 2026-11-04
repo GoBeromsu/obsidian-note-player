@@ -216,6 +216,44 @@ describe('migration gate regressions', () => {
 		} else expect(notices).toEqual([NOTICE_CATALOG.migration_already_bases.template]);
 	});
 
+	it.each([
+		{ yaml: 'subtype: music-playlist', candidate: false },
+		{ yaml: 'mytracks: [', candidate: false },
+		{ yaml: 'prototype: music-playlist', candidate: false },
+		{ yaml: '"subtype": music-playlist', candidate: false },
+		{ yaml: '{subtype: music-playlist, mytracks: [', candidate: false },
+		{ yaml: '"type": music-playlist', candidate: true },
+		{ yaml: "'type': music-playlist", candidate: true },
+		{ yaml: '"tracks": [', candidate: true },
+		{ yaml: "'tracks': [", candidate: true },
+		{ yaml: '{type: music-playlist, other: [', candidate: true },
+		{ yaml: '{other: value, "tracks": [', candidate: true },
+		{ yaml: "  - 'type': music-playlist", candidate: true },
+		{ yaml: '\t- tracks: [', candidate: true },
+	])('matches whole malformed mapping keys only: $yaml', async ({ yaml, candidate }) => {
+		const host = await fixture();
+		await run(host);
+		host.settings.legacyPlaylistTrackProperty = 'tracks';
+		const path = 'Playlists/Boundary.md';
+		await host.app.vault.create(path, '---\n{"type":"other"}\n---\n');
+		state(host.app).cache.delete(path);
+		const malformed = `---\n${yaml}\nparticipants:\n  # meeting-transcript:participants:start\n{{participants_yaml}}\n---\n`;
+		state(host.app).contents.set(path, malformed);
+		notices.length = 0;
+		const notice = vi.spyOn(noticeService, 'showNotice');
+
+		await run(host);
+
+		if (candidate) {
+			expect(notice).toHaveBeenCalledWith('migration_failed', {
+				name: path, reason: expect.stringContaining('Needs review'),
+			});
+			expect(notices).toHaveLength(1);
+		} else expect(notices).toEqual([NOTICE_CATALOG.migration_already_bases.template]);
+		expect(state(host.app).contents.get(path)).toBe(malformed);
+		expect(host.settings.legacyPlaylistTrackProperty).toBe('tracks');
+	});
+
 	it('B12 reuses the actual embed after an equal-length edit before attachment', async () => {
 		const host = await fixture();
 		const fake = state(host.app);

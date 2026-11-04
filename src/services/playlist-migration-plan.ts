@@ -24,7 +24,7 @@ export interface MigrationScan {
 export async function collectMigrationPlan(app: App, settings: NotePlayerSettings, notePath?: string): Promise<MigrationScan> {
 	const legacyKey = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
 	const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const rawCandidate = new RegExp(`(^|[\\s{,])["']?${escapePattern(legacyKey)}["']?\\s*:|["']?type["']?\\s*:\\s*["']?${escapePattern(settings.playlistNoteType)}["']?(?=[\\s,}]|$)`, 'm');
+	const rawCandidate = new RegExp(`(?:^[ \\t]*(?:#[ \\t]*)?(?:-[ \\t]+)?|[{,][ \\t]*)["']?(?:${escapePattern(legacyKey)}["']?[ \\t]*:|type["']?[ \\t]*:\\s*["']?${escapePattern(settings.playlistNoteType)}["']?(?=[\\s,}]|$))`, 'm');
 	const folder = settings.playlistFolder.replace(/^\/|\/$/g, '');
 	const playlists: MigrationPlaylistInput[] = [];
 	const failures: MigrationFailure[] = [];
