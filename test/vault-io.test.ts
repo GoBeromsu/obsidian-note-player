@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 import { App, TFile, TFolder, type CachedMetadata, type TAbstractFile } from 'obsidian';
 import { DEFAULT_PROPERTY_MAPPING, DEFAULT_SETTINGS } from '../src/domain/config';
 import { buildMusicLibrary } from '../src/domain/library-index';
@@ -22,7 +23,7 @@ vi.mock('obsidian', () => {
     TFile, TFolder,
     normalizePath: (path: string) => path.replace(/^\/|\/$/g, ''),
     parseLinktext: (text: string) => ({ path: text.split('#')[0] ?? '', subpath: text.includes('#') ? text.slice(text.indexOf('#')) : '' }),
-    parseYaml: (content: string) => JSON.parse(content),
+    parseYaml: (content: string) => parse(content),
     App: class {
       vault = {
         getMarkdownFiles: () => [...storage.files.values()].filter((file) => file instanceof TFile && Reflect.get(file, 'extension') === 'md'),
@@ -64,6 +65,42 @@ beforeEach(() => { storage.files.clear(); storage.caches.clear(); storage.conten
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('vault library snapshots', () => {
+  it('keeps both playlists and all tracks when one paired base is unparseable, warning once across refreshes', async () => {
+    const app = new App();
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    for (const name of ['Broken', 'Good']) {
+      const base = note(`${name}.base`);
+      note(`${name}.md`, {
+        frontmatter: { type: 'music-playlist' },
+        embeds: [{ link: base.path, original: `![[${base.path}]]`, position }],
+      });
+    }
+    for (const name of ['Z', 'A']) {
+      note(`${name}.md`, {
+        frontmatter: { type: 'music', source: 'https://youtu.be/dQw4w9WgXcQ' },
+        frontmatterLinks: ['Broken', 'Good'].map((playlist, index) => ({
+          key: `playlists.${index}`, link: `${playlist}.md`, original: `[[${playlist}]]`,
+        })),
+      });
+    }
+    storage.contents.set('Broken.base', 'views:\n  - type: cards\n    name: [unclosed');
+    storage.contents.set('Good.base', 'views:\n  - type: cards\n    sort:\n      - property: file.name\n        direction: DESC\n');
+    const snapshots = collectNoteSnapshots(app, ['/'], DEFAULT_PROPERTY_MAPPING);
+
+    for (let refresh = 0; refresh < 2; refresh++) {
+      const configs = await collectBaseConfigs(app, snapshots, 'music-playlist');
+      const library = buildMusicLibrary(snapshots, DEFAULT_PROPERTY_MAPPING, configs);
+      expect(library.tracks.map((track) => track.path)).toEqual(['A.md', 'Z.md']);
+      expect(library.playlists.map((playlist) => ({ path: playlist.path, tracks: playlist.trackPaths }))).toEqual([
+        { path: 'Broken.md', tracks: ['A.md', 'Z.md'] },
+        { path: 'Good.md', tracks: ['Z.md', 'A.md'] },
+      ]);
+    }
+    expect(warning).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('Broken.base'), expect.objectContaining({ name: 'YAMLParseError' }),
+    );
+  });
+
   it('discovers notes from the metadata cache without folder traversal or note reads', () => {
     const app = new App();
     const root = vi.spyOn(app.vault, 'getRoot').mockImplementation(() => { throw new Error('No folder walk'); });
