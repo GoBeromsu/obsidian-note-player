@@ -22,12 +22,6 @@ export class PlaylistNameModal extends Modal {
 			.addText((text) => {
 				this.input = text;
 				text.setPlaceholder('Late-night queue');
-				text.inputEl.addEventListener('keydown', (event) => {
-					if (event.key !== 'Enter' || event.isComposing) return;
-					event.preventDefault();
-					this.submit();
-				});
-				window.setTimeout(() => text.inputEl.focus(), 0);
 			});
 
 		new Setting(contentEl)
@@ -42,6 +36,20 @@ export class PlaylistNameModal extends Modal {
 					.setButtonText('Cancel')
 					.onClick(() => this.close()),
 			);
+
+		this.scope.register([], 'Enter', (event) => {
+			if (event.isComposing) return true;
+			if (
+				!this.input ||
+				(event.target !== this.input.inputEl &&
+					this.input.inputEl.ownerDocument.activeElement !== this.input.inputEl)
+			) {
+				return true;
+			}
+			this.submit();
+			return false;
+		});
+		this.input?.inputEl.focus();
 	}
 
 	private submit(): void {
