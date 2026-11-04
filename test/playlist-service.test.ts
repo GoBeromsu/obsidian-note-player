@@ -56,6 +56,7 @@ function setup() {
     app: new App(), owner: new Component(), getSettings: () => ({ ...DEFAULT_SETTINGS, playlistFolder: 'Lists' }),
     getLibrary: () => library, refresh: () => Promise.resolve(),
     selectPlaylist: (path) => { selected.push(path); return Promise.resolve(); },
+    saveSettings: () => Promise.resolve(), invalidateRefresh: () => {},
   });
   disk.files.set('Lists/Mix.md', '');
   disk.files.set('Lists/Other.md', '');

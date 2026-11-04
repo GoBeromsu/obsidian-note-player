@@ -16,12 +16,26 @@ interface PlaylistServiceHost {
   getLibrary(): MusicLibrarySnapshot;
   refresh(): Promise<void>;
   selectPlaylist(path: string): Promise<void>;
+  saveSettings(): Promise<void>;
+  invalidateRefresh(): void;
 }
 
 export class PlaylistService {
+  playingPlaylistPath: string | null = null;
   private playlistEdits: Promise<void> = Promise.resolve();
 
   constructor(private readonly host: PlaylistServiceHost) {}
+
+  followRename(path: string, oldPath: string, schedule: () => void): void {
+    this.host.invalidateRefresh();
+    const settings = this.host.getSettings();
+    if (settings.lastPlaylistPath === oldPath) {
+      settings.lastPlaylistPath = path;
+      void this.host.saveSettings();
+    }
+    if (this.playingPlaylistPath === oldPath) this.playingPlaylistPath = path;
+    schedule();
+  }
 
   async createPlaylist(name: string): Promise<string> {
     const { app } = this.host;
