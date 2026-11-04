@@ -173,7 +173,7 @@ export class FolderSuggestModal extends KeySuggestModal {
 	}
 
 	protected creatable(query: string): string | null {
-		const path = normalizePath(query);
+		const path = normalizePath(query.trim());
 		return isCreatableFolderPath(path) ? createItemFor(path, this.getItems()) : null;
 	}
 }

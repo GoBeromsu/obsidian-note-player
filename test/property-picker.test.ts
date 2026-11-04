@@ -10,7 +10,7 @@ vi.mock('obsidian', () => ({
     };
     metadataCache = { getFileCache: () => ({ frontmatter: { performer: 'performance', source: 'url' } }) };
   },
-  normalizePath: (path: string) => path.trim().replace(/^\/+|\/+$/g, '') || '/',
+  normalizePath: (path: string) => path.replace(/^\/+|\/+$/g, '') || '/',
   FuzzySuggestModal: class {
     modalEl = { addClass() {} };
     inputEl = { value: '' };
@@ -90,5 +90,9 @@ describe('property picker selection', () => {
     expect(new FolderSuggestModal(new App(), 'Music', () => {}, 'Later').getSuggestions('').map(({ item }) => item)).toEqual(['Music', 'Later', '/']);
     expect(items('/New/Sub/')).toEqual(['New/Sub']);
     expect(items('../outside')).toEqual([]);
+    expect(items(' ../outside')).toEqual([]);
+    expect(items(' .hidden')).toEqual([]);
+    expect(items('New/ ')).toEqual(['New']);
+    expect(items('Music/ ')).toEqual([]);
   });
 });
