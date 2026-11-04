@@ -68,6 +68,8 @@ describe('playlist base content', () => {
       '  - type: cards',
       '    name: "Cards"',
       '    image: note.image',
+      '    imageFit: ""',
+      '    imageAspectRatio: 0.5625',
       '    sort:',
       '      - property: file.name',
       '        direction: ASC',
@@ -80,6 +82,11 @@ describe('playlist base content', () => {
       '      - file.name',
       '      - author',
       '      - source',
+      'properties:',
+      '  file.name:',
+      '    displayName: "Title"',
+      '  note.author:',
+      '    displayName: "Artist"',
       '',
     ]);
   });
@@ -89,8 +96,13 @@ describe('playlist base content', () => {
       ...DEFAULT_PROPERTY_MAPPING, musicThumbnailProperty: 'album art', musicArtistProperty: 'performer',
     });
     expect(parse(content)).toMatchObject({
+      properties: {
+        'file.name': { displayName: 'Title' },
+        'note.performer': { displayName: 'Artist' },
+      },
       views: [
         { type: 'cards', image: 'note.album art', order: ['file.name', 'note.performer'],
+          imageFit: '', imageAspectRatio: 0.5625,
           sort: [{ property: 'file.name', direction: 'ASC' }] },
         { type: 'table' },
       ],

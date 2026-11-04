@@ -73,7 +73,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			if (pairedBase && !cardsUpgrades.has(pairedBase.path)) {
 				try {
 					const before = await app.vault.read(pairedBase);
-					const after = upgradePlaylistCards(before, settings.musicThumbnailProperty, { parse: parseYaml, stringify: stringifyYaml });
+					const after = upgradePlaylistCards(before, settings, { parse: parseYaml, stringify: stringifyYaml });
 					if (before !== after) cardsUpgrades.set(pairedBase.path, { notePath: file.path, basePath: pairedBase.path, before, after });
 				} catch (error: unknown) {
 					warnUnreadableBase(app, pairedBase.path, error);
