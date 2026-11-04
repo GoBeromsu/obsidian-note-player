@@ -87,7 +87,7 @@ describe('migration gate regressions', () => {
 			await run(host);
 			host.settings.legacyPlaylistTrackProperty = 'songs';
 			await host.app.vault.create(path, '---\n{"type":"template"}\n---\n');
-			state(host.app).contents.set(path, '---\ntype: template\nparticipants:\n{{participants_yaml}}\n---\n');
+			state(host.app).contents.set(path, '---\n{{participants_yaml}}\n---\n');
 			notices.length = 0;
 
 			await run(host);
@@ -101,7 +101,7 @@ describe('migration gate regressions', () => {
 		'completes conversion without unrelated malformed YAML errors: %s', async (path) => {
 			const host = await fixture();
 			await host.app.vault.create(path, '---\n{"type":"template"}\n---\n');
-			state(host.app).contents.set(path, '---\ntype: template\nparticipants:\n{{participants_yaml}}\n---\n');
+			state(host.app).contents.set(path, '---\n{{participants_yaml}}\n---\n');
 
 			await run(host);
 
@@ -115,7 +115,7 @@ describe('migration gate regressions', () => {
 		const host = await fixture();
 		const path = 'Playlists/Broken.md';
 		await host.app.vault.create(path, header);
-		const malformed = '---\ntype: music-playlist\nsongs: [\n---\n';
+		const malformed = '---\n{"type":"music-playlist","songs":[\n---\n';
 		state(host.app).contents.set(path, malformed);
 		const notice = vi.spyOn(noticeService, 'showNotice');
 
@@ -140,7 +140,7 @@ describe('migration gate regressions', () => {
 		const path = 'Playlists/meeting.template.md';
 		await host.app.vault.create(path, header);
 		state(host.app).contents.set(path,
-			'---\ntype: template\nparticipants:\n{{participants_yaml}}\n---\ntype: music-playlist\nsongs: []\n');
+			'---\ntype: template\nparticipants:\n  # meeting-transcript:participants:start\n{{participants_yaml}}\n---\ntype: music-playlist\nsongs: []\n');
 		notices.length = 0;
 
 		await run(host);
@@ -154,6 +154,10 @@ describe('migration gate regressions', () => {
 		{ cache: 'other', healthy: false, yaml: 'type: "music-playlist"\nbroken: [' },
 		{ cache: 'missing', healthy: true, yaml: "broken: [\ntype: 'music-playlist'" },
 		{ cache: 'other', healthy: true, yaml: 'broken: [\nsongs : [' },
+		{ cache: 'missing', healthy: false, yaml: '{type: music-playlist, songs: [' },
+		{ cache: 'other', healthy: true, yaml: '{type: other, songs: [' },
+		{ cache: 'missing', healthy: false, yaml: 'nested:\n  type: music-playlist\n  broken: [' },
+		{ cache: 'other', healthy: true, yaml: 'nested:\n  songs: [' },
 	])('SC2 reports malformed content with $cache cache and healthy=$healthy: $yaml', async ({ cache, healthy, yaml }) => {
 		const host = await fixture();
 		const fake = state(host.app);
@@ -187,9 +191,10 @@ describe('migration gate regressions', () => {
 		{ yaml: 'type: "mix[live]"', candidate: true },
 		{ yaml: 'songsXlist: [', candidate: false },
 		{ yaml: 'type: mixl', candidate: false },
-		{ yaml: 'nested:\n  songs.list: [\n  type: mix[live]', candidate: false },
-		{ yaml: '# songs.list: [\n# type: mix[live]', candidate: false },
-	])('classifies malformed custom settings literally at top level: $yaml', async ({ yaml, candidate }) => {
+		{ yaml: 'type: mix[live]extra', candidate: false },
+		{ yaml: 'nested:\n  songs.list: [\n  type: mix[live]', candidate: true },
+		{ yaml: '# songs.list: [\n# type: mix[live]', candidate: true },
+	])('classifies malformed custom settings conservatively and literally: $yaml', async ({ yaml, candidate }) => {
 		const host = await fixture();
 		await run(host);
 		host.settings.legacyPlaylistTrackProperty = 'songs.list';

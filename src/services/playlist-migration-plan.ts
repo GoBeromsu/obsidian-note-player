@@ -24,7 +24,7 @@ export interface MigrationScan {
 export async function collectMigrationPlan(app: App, settings: NotePlayerSettings, notePath?: string): Promise<MigrationScan> {
 	const legacyKey = settings.legacyPlaylistTrackProperty ?? LEGACY_TRACKS_KEY;
 	const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const rawCandidate = new RegExp(`^(?:${escapePattern(legacyKey)}\\s*:|type\\s*:\\s*["']?${escapePattern(settings.playlistNoteType)}["']?\\s*$)`);
+	const rawCandidate = new RegExp(`(^|[\\s{,])["']?${escapePattern(legacyKey)}["']?\\s*:|["']?type["']?\\s*:\\s*["']?${escapePattern(settings.playlistNoteType)}["']?(?=[\\s,}]|$)`, 'm');
 	const folder = settings.playlistFolder.replace(/^\/|\/$/g, '');
 	const playlists: MigrationPlaylistInput[] = [];
 	const failures: MigrationFailure[] = [];
@@ -50,7 +50,7 @@ export async function collectMigrationPlan(app: App, settings: NotePlayerSetting
 			try {
 				parsed = info.exists ? parseYaml(info.frontmatter) : {};
 			} catch (error: unknown) {
-				if (info.frontmatter.split(/\r?\n/).some((line) => rawCandidate.test(line))) {
+				if (rawCandidate.test(info.frontmatter)) {
 					const reason = error instanceof Error ? error.message : String(error);
 					failures.push({ path: file.path, reason: `Needs review: playlist YAML could not be parsed: ${reason}` });
 				}
