@@ -145,12 +145,8 @@ const manifest = {
   author: 'Test',
 };
 
-function appWithFolders(paths: string[]): App {
-  return Object.assign(new App(), { vault: { getAllFolders: () => paths.map((path) => ({ path })) } });
-}
-
 describe('settings definitions', () => {
-  const app = appWithFolders(['Music/Sub', 'Inbox', 'Music']);
+  const app = new App();
   const host = new SettingsHostStub(app, manifest);
   host.settings = { ...DEFAULT_SETTINGS, playlistFolder: 'Inbox', musicFolder: '' };
   const rows = flattenDefinitions(new NotePlayerSettingsTab(app, host).getSettingDefinitions());
@@ -170,59 +166,12 @@ describe('settings definitions', () => {
     expect(convertPlaylistNotes).toHaveBeenCalledWith(host);
   });
 
-  it('fills the folder dropdowns in order from the vault root, surfacing the legacy empty value only where saved', () => {
-    const playlist = renderRow(rows, 'Playlist folder');
-    expect(playlist.added).toEqual([['/', 'Vault root'], ['Inbox', 'Inbox'], ['Music', 'Music'], ['Music/Sub', 'Music/Sub']]);
-    expect(playlist.value).toBe('Inbox');
-    const music = renderRow(rows, 'Music folder');
-    expect(music.added.map(([value]) => value)).toEqual(['/', '', 'Inbox', 'Music', 'Music/Sub']);
-    expect(music.added[1]).toEqual(['', 'Default location (legacy)']);
-    expect(music.value).toBe('');
-  });
-
-  it('inserts integer-like folder names after the vault root in localeCompare order', () => {
-    const numericApp = appWithFolders(['a', '2024', '10']);
-    const numericHost = new SettingsHostStub(numericApp, manifest);
-    numericHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: '/' };
-    const numericRows = flattenDefinitions(new NotePlayerSettingsTab(numericApp, numericHost).getSettingDefinitions());
-    const { added, value } = renderRow(numericRows, 'Playlist folder');
-    expect(added).toEqual([['/', 'Vault root'], ['10', '10'], ['2024', '2024'], ['a', 'a']]);
-    expect(value).toBe('/');
-  });
-
-  it('offers and selects a folder named __proto__', () => {
-    const protoApp = appWithFolders(['__proto__', 'Inbox']);
-    const protoHost = new SettingsHostStub(protoApp, manifest);
-    protoHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: '__proto__' };
-    const protoRows = flattenDefinitions(new NotePlayerSettingsTab(protoApp, protoHost).getSettingDefinitions());
-    const { added, value } = renderRow(protoRows, 'Playlist folder');
-    expect(added).toEqual([['/', 'Vault root'], ['__proto__', '__proto__'], ['Inbox', 'Inbox']]);
-    expect(value).toBe('__proto__');
-  });
-
-  it('persists a folder pick through the settings normalizer', () => {
-    const pickHost = new SettingsHostStub(app, manifest);
-    pickHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: 'Inbox' };
-    const pickRows = flattenDefinitions(new NotePlayerSettingsTab(app, pickHost).getSettingDefinitions());
-    renderRow(pickRows, 'Playlist folder').change('Music/Sub');
-    expect(pickHost.settings.playlistFolder).toBe('Music/Sub');
-  });
-
-  it('reads the vault folders again on every render instead of caching them at definition time', () => {
-    const folders = ['Inbox'];
-    const liveApp = Object.assign(new App(), { vault: { getAllFolders: () => folders.map((path) => ({ path })) } });
-    const liveHost = new SettingsHostStub(liveApp, manifest);
-    liveHost.settings = { ...DEFAULT_SETTINGS, playlistFolder: 'Inbox' };
-    const liveRows = flattenDefinitions(new NotePlayerSettingsTab(liveApp, liveHost).getSettingDefinitions());
-    expect(renderRow(liveRows, 'Playlist folder').added.map(([value]) => value)).toEqual(['/', 'Inbox']);
-    folders.push('New');
-    expect(renderRow(liveRows, 'Playlist folder').added.map(([value]) => value)).toEqual(['/', 'Inbox', 'New']);
-  });
-
   it('renders every mapping key through a picker row instead of a text or folder control', () => {
     expect(controls.filter((control) => control.type === 'text' || control.type === 'folder')).toEqual([]);
     const pickerRows = rows.filter(isRenderRow).filter((row) => typeof row.desc === 'string' && row.desc.includes('Default: '));
     expect(pickerRows.map((row) => row.name)).toEqual([
+      'Playlist folder',
+      'Music folder',
       'URL property',
       'Thumbnail property',
       'Artist property',
@@ -240,7 +189,7 @@ describe('settings control value normalization', () => {
   it.each(Object.entries(defaults).flatMap(([key, expected]) =>
     ['', '  '].map((value) => ({ key, value, expected })),
   ))('stores $expected when the $key control is emptied', ({ key, value, expected }) => {
-    const app = appWithFolders([]);
+    const app = new App();
     const host = new SettingsHostStub(app, manifest);
     host.settings = { ...DEFAULT_SETTINGS, [key]: 'custom' };
     const tab = new NotePlayerSettingsTab(app, host);

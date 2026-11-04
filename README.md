@@ -71,7 +71,7 @@ Playlist folder, music folder, property mapping for URL, thumbnail, artist, play
 - **Music folder** is a library discovery scope and where imported track notes are created.
 - **Playlist folder** is a playlist discovery scope and where new playlists are created.
 
-Both folder settings include all subfolders. Choosing **Vault root** in either setting includes the whole vault, including all subfolders.
+Both folder settings include all subfolders. Pick an existing folder from the list, or type a new path to create it. In any picker, **Shift+Enter** creates what you typed, even when other options match. Choosing **Vault root** in either setting includes the whole vault, including all subfolders.
 
 ## Disclosures
 
@@ -98,7 +98,7 @@ Note Player is desktop only. It has no telemetry and no accounts, and it sends n
 ### Reading your vault
 
 - To build the music library, the plugin reads the frontmatter of Markdown notes in your **Music folder** and **Playlist folder**, including all subfolders, and in the track notes your playlists link to, through Obsidian's metadata cache. Choosing **Vault root** in either folder setting includes the whole vault, including all subfolders. Initial indexing is deferred until the workspace layout is ready; subsequent indexing runs when notes change and when you run **Refresh music library**. Discovery uses cached Markdown file metadata rather than walking folders or reading note contents. Only paired `.base` files are read for queue sorting. Nothing leaves your device.
-- The property fields in settings suggest frontmatter keys found across your vault.
+- The property pickers in settings list frontmatter keys found across your vault, with how many notes use each one and a sample value. Nothing leaves your device.
 
 ### Clipboard
 

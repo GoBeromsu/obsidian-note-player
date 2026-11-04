@@ -4,19 +4,19 @@ import {
 	Plugin,
 	PluginSettingTab,
 	type ButtonComponent,
-	type ExtraButtonComponent,
 	type Setting,
 	type SettingDefinitionItem,
 	type SettingDefinitionRender,
 } from 'obsidian';
-import { DEFAULT_PROPERTY_MAPPING, normalizeSettingValue } from '../domain/config';
-import { buildFolderOptions } from '../domain/settings-options';
+import { DEFAULT_PROPERTY_MAPPING, DEFAULT_SETTINGS, normalizeSettingValue, VAULT_ROOT } from '../domain/config';
+import { folderLabel } from '../domain/settings-options';
 import { convertPlaylistNotes } from '../services/playlist-migration-service';
+import { ensureFolder } from '../services/vault-io';
 import type { AudioFormat } from '../types/audio';
 import type { NotePlayerSettings, TurntableStyle } from '../types/settings';
 import type { ThumbnailCachePort } from '../types/view';
 import { showNotice } from './notices';
-import { PropertySuggestModal, ValueSuggestModal } from './views/PropertySuggestModal';
+import { FolderSuggestModal, PropertySuggestModal, ValueSuggestModal } from './views/PropertySuggestModal';
 
 interface SettingsHost extends Plugin {
 	settings: NotePlayerSettings;
@@ -26,12 +26,12 @@ interface SettingsHost extends Plugin {
 	getThumbnailCache(): ThumbnailCachePort | null;
 }
 
-type MappingKey = keyof typeof DEFAULT_PROPERTY_MAPPING;
-type FolderKey = 'playlistFolder' | 'musicFolder';
+type PickerKey = keyof typeof DEFAULT_PROPERTY_MAPPING | 'playlistFolder' | 'musicFolder';
 
 interface Picker {
 	tooltip: string;
-	open: (current: string, onPick: (value: string) => void) => void;
+	label?: (value: string) => string;
+	open: (current: string, onPick: (value: string) => void, fallback: string) => void;
 }
 
 const NO_REFRESH_KEYS: readonly string[] = ['audioFormat', 'autoOpenOnStartup', 'turntableSounds'];
@@ -76,11 +76,16 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		const property: Picker = {
 			tooltip: 'Choose a property',
-			open: (current, onPick) => new PropertySuggestModal(this.app, current, onPick).open(),
+			open: (current, onPick, fallback) => new PropertySuggestModal(this.app, current, onPick, fallback).open(),
 		};
 		const typeValue: Picker = {
 			tooltip: 'Choose a type value',
-			open: (current, onPick) => new ValueSuggestModal(this.app, TYPE_PROPERTY, current, onPick).open(),
+			open: (current, onPick, fallback) => new ValueSuggestModal(this.app, TYPE_PROPERTY, current, onPick, fallback).open(),
+		};
+		const folder: Picker = {
+			tooltip: 'Choose a folder',
+			label: folderLabel,
+			open: (current, onPick, fallback) => new FolderSuggestModal(this.app, current, (value) => { void this.pickFolder(value, onPick); }, fallback).open(),
 		};
 		return [
 			{
@@ -112,24 +117,18 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 						desc: 'Open the playlist view automatically when Obsidian finishes loading.',
 						control: { type: 'toggle', key: 'autoOpenOnStartup' },
 					},
-					{
-						name: 'Thumbnail cache',
-						desc: 'Track thumbnails are saved in the plugin folder so they show instantly, even offline. Cleared thumbnails download again the next time they appear.',
-						render: (setting) => {
-							setting.addButton((button) => button.setButtonText('Clear').onClick(() => { void this.clearThumbnails(button); }));
-						},
-					},
 				],
 			},
 			{
 				type: 'group',
 				heading: 'Library',
 				items: [
-					this.folderRow('Playlist folder', 'Playlists are read from this folder and its subfolders, and new playlists are created here.', 'playlistFolder'),
-					this.folderRow(
+					this.pickerRow('Playlist folder', 'Playlists are read from this folder and its subfolders, and new playlists are created here.', 'playlistFolder', folder),
+					this.pickerRow(
 						'Music folder',
-						'Vault folder for notes created from pasted YouTube URLs. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists. Vault root includes all folders in the vault.',
+						'Notes from pasted YouTube URLs are created here. The library reads track notes in this folder and its subfolders, plus tracks linked from playlists.',
 						'musicFolder',
+						folder,
 					),
 				],
 			},
@@ -181,6 +180,19 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 					},
 				],
 			},
+			{
+				type: 'group',
+				heading: 'Cache',
+				items: [
+					{
+						name: 'Thumbnail cache',
+						desc: 'Track thumbnails are saved in the plugin folder so they show instantly, even offline. Cleared thumbnails download again the next time they appear.',
+						render: (setting) => {
+							setting.addButton((button) => button.setButtonText('Clear').onClick(() => { void this.clearThumbnails(button); }));
+						},
+					},
+				],
+			},
 		];
 	}
 
@@ -201,56 +213,44 @@ export class NotePlayerSettingsTab extends PluginSettingTab {
 		}
 	}
 
-	// Rendered imperatively so the options are read from the vault on every display (Obsidian caches declarative
-	// definitions) and inserted in order (an options object would reorder integer-like folder names).
-	private folderRow(name: string, desc: string, key: FolderKey): SettingDefinitionRender {
-		return {
-			name,
-			desc,
-			render: (setting: Setting) => {
-				setting.addDropdown((dropdown) => {
-					const folders = this.app.vault.getAllFolders(false).map((folder) => folder.path);
-					for (const [value, label] of buildFolderOptions(folders, this.host.settings[key])) dropdown.addOption(value, label);
-					dropdown.setValue(this.host.settings[key]).onChange((value) => { this.setControlValue(key, value); });
-				});
-			},
-		};
+	// The setting only moves once the folder exists, so a failed create leaves the previous choice intact.
+	private async pickFolder(value: string, onPick: (value: string) => void): Promise<void> {
+		try {
+			await ensureFolder(this.app, value);
+			onPick(value);
+		} catch (error) {
+			console.error('[Note Player] Could not create folder', value, error);
+			showNotice('folder_create_failed', { path: value });
+		}
 	}
 
-	private pickerRow(name: string, desc: string, key: MappingKey, picker: Picker): SettingDefinitionRender {
-		const fallback = DEFAULT_PROPERTY_MAPPING[key];
-		return {
-			name,
-			desc: `${desc} Default: ${fallback}.`,
-			render: (setting: Setting) => {
-				const current = () => String(this.getControlValue(key));
-				let reset: ExtraButtonComponent | null = null;
-				let button: ButtonComponent | null = null;
-				const sync = () => {
-					const value = current();
-					button?.setButtonText(value);
-					reset?.setDisabled(value === fallback);
-				};
-				const apply = (value: string) => {
-					this.setControlValue(key, value);
-					sync();
-					if (button) settle(this.host, button.buttonEl);
-				};
-				setting.setClass('onp-picker-setting');
-				setting.addExtraButton((extra) => {
-					reset = extra.setIcon('rotate-ccw').setTooltip('Reset to default').onClick(() => {
-						if (current() !== fallback) apply(fallback);
-					});
-				});
-				setting.addButton((control) => {
-					button = control.setTooltip(picker.tooltip).onClick(() => picker.open(current(), apply));
-					// Obsidian styles `.dropdown` by class, so the button inherits the native select look, chevrons included.
-					control.buttonEl.addClass('dropdown', 'onp-picker-button');
-					control.buttonEl.setAttr('aria-haspopup', 'dialog');
-				});
+	private pickerRow(name: string, desc: string, key: PickerKey, picker: Picker): SettingDefinitionRender {
+		// An empty saved folder is migrated on load, so its default is not a selectable value.
+		const fallback = DEFAULT_SETTINGS[key] || VAULT_ROOT;
+		const shown = picker.label?.(fallback) ?? fallback;
+		return { name, desc: `${desc} Default: ${shown}.`, render: (setting: Setting) => { this.renderPicker(setting, key, picker, fallback); } };
+	}
+
+	private renderPicker(setting: Setting, key: PickerKey, picker: Picker, fallback: string): void {
+		setting.setClass('onp-picker-setting');
+		setting.addButton((button) => {
+			const current = () => String(this.getControlValue(key));
+			const sync = () => {
+				const value = current();
+				const text = picker.label?.(value) ?? value;
+				button.setButtonText(text).setTooltip(`${picker.tooltip}: ${text}`);
+				button.buttonEl.toggleClass('is-custom', value !== fallback);
+			};
+			button.onClick(() => picker.open(current(), (value) => {
+				this.setControlValue(key, value);
 				sync();
-			},
-		};
+				settle(this.host, button.buttonEl);
+			}, fallback));
+			// Obsidian styles `.dropdown` by class, so the button inherits the native select look, chevrons included.
+			button.buttonEl.addClass('dropdown', 'onp-picker-button');
+			button.buttonEl.setAttr('aria-haspopup', 'dialog');
+			sync();
+		});
 	}
 }
 

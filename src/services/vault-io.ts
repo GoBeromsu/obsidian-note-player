@@ -12,7 +12,7 @@ export async function ensureFolder(app: App, folderPath: string): Promise<void> 
 	let current = '';
 	for (const segment of folderPath.split('/').filter(Boolean)) {
 		current = current ? `${current}/${segment}` : segment;
-		if (!app.vault.getAbstractFileByPath(current)) {
+		if (!app.vault.getFolderByPath(current)) {
 			await app.vault.createFolder(current);
 		}
 	}
