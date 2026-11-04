@@ -183,8 +183,8 @@ export async function collectBaseConfigs(app: App, notes: MarkdownNoteSnapshot[]
 	for (const path of paths) {
 		const file = app.vault.getFileByPath(path);
 		if (!file) continue;
-		const content = await app.vault.cachedRead(file);
 		try {
+			const content = await app.vault.cachedRead(file);
 			configs.set(path, parseYaml(content));
 		} catch (error: unknown) {
 			if (!(error instanceof Error)) throw error;
@@ -195,7 +195,7 @@ export async function collectBaseConfigs(app: App, notes: MarkdownNoteSnapshot[]
 			}
 			if (!warned.has(path)) {
 				warned.add(path);
-				console.warn(`[Note Player] Could not parse playlist base ${path}; using name-ascending queue order.`, error);
+				console.warn(`[Note Player] Could not read or parse playlist base ${path}; using name-ascending queue order.`, error);
 			}
 		}
 	}
