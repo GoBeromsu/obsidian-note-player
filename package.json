@@ -38,6 +38,7 @@
 		"vitest": "^5.0.5"
 	},
 	"overrides": {
+		"minimatch": "^11.0.1",
 		"moment": "2.31.0"
 	},
 	"dependencies": {
